@@ -1,0 +1,1223 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rig — Architecture Logbook</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,600;1,400;1,600&family=IBM+Plex+Serif:ital,wght@0,400;0,600;0,700;1,400&family=Inter:wght@500;700&display=swap"
+        rel="stylesheet">
+
+    <style>
+        /* ============ THEME: HARBOR MASTER'S LOGBOOK ============ */
+        :root {
+            --font-serif: 'IBM Plex Serif', serif;
+            --font-mono: 'IBM Plex Mono', monospace;
+            --font-sans: 'Inter', sans-serif;
+
+            --bg: #f5f3ef;
+            --surface: #ebe8e2;
+            --surface-alt: #e1ddd5;
+            --border: #d1cdc5;
+            --border-heavy: #a8a39a;
+
+            --text-heading: #1e1d1c;
+            --text-main: #2c2a29;
+            --text-muted: #6e6a66;
+
+            --rust: #b34526;
+            --rust-dim: rgba(179, 69, 38, 0.1);
+            --slate: #3d5e5d;
+            --slate-dim: rgba(61, 94, 93, 0.08);
+            --brass: #b5822c;
+            --brass-dim: rgba(181, 130, 44, 0.08);
+            --ink: #2c2a29;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg: #1c1b1a;
+                --surface: #262524;
+                --surface-alt: #302e2d;
+                --border: #3e3c3a;
+                --border-heavy: #5e5a57;
+
+                --text-heading: #efedea;
+                --text-main: #dcdad7;
+                --text-muted: #9b9997;
+
+                --rust: #c35a39;
+                --rust-dim: rgba(195, 90, 57, 0.15);
+                --slate: #5b7b7a;
+                --slate-dim: rgba(91, 123, 122, 0.12);
+                --brass: #d3a052;
+                --brass-dim: rgba(211, 160, 82, 0.12);
+                --ink: #efedea;
+            }
+        }
+
+        /* ============ RESET & BASE ============ */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            background-color: var(--bg);
+            color: var(--text-main);
+            font-family: var(--font-serif);
+            font-size: 16px;
+            line-height: 1.6;
+            padding: 2rem 5vw;
+            background-image: url("data:image/svg+xml,%3Csvg width='40' height='40' viewBox='0 0 40 40' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0 0h40v40H0V0zm20 20h20v20H20V20zM0 20h20v20H0V20z' fill='%23000000' fill-opacity='0.015' fill-rule='evenodd'/%3E%3C/svg%3E");
+            -webkit-font-smoothing: antialiased;
+            overflow-wrap: break-word;
+        }
+
+        ::selection { background: var(--rust-dim); color: var(--rust); }
+
+        /* ============ TYPOGRAPHY ============ */
+        h1, h2, h3, h4 {
+            font-family: var(--font-serif);
+            color: var(--text-heading);
+            font-weight: 700;
+        }
+        h1 { font-size: 3.5rem; line-height: 1.1; letter-spacing: -0.02em; margin-bottom: 0.5rem; }
+        h2 {
+            font-size: 1.75rem; margin-bottom: 1.5rem;
+            display: flex; align-items: center; gap: 1rem;
+        }
+        h2::before {
+            content: ''; display: inline-block;
+            width: 1.5rem; height: 2px; background-color: var(--rust); flex-shrink: 0;
+        }
+        h3 { font-size: 1.25rem; margin-bottom: 0.75rem; }
+        p { margin-bottom: 1.25rem; max-width: 75ch; }
+
+        code {
+            font-family: var(--font-mono); font-size: 0.85em;
+            background: var(--surface); padding: 0.2em 0.4em;
+            border: 1px solid var(--border); border-radius: 2px;
+            color: var(--text-heading);
+        }
+
+        .mono { font-family: var(--font-mono); }
+        .sans-label {
+            font-family: var(--font-sans); font-size: 0.65rem;
+            text-transform: uppercase; letter-spacing: 0.05em;
+            font-weight: 700; color: var(--text-muted);
+        }
+
+        /* ============ LAYOUT ============ */
+        .doc-wrapper {
+            max-width: 1400px; margin: 0 auto;
+            border: 1px solid var(--border-heavy);
+            background: var(--bg);
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.05);
+        }
+
+        .doc-header {
+            padding: 4rem 3rem;
+            border-bottom: 2px solid var(--border-heavy);
+            background: var(--surface);
+        }
+
+        .meta-line {
+            display: flex; gap: 2rem; flex-wrap: wrap;
+            margin-top: 2rem; padding-top: 1rem;
+            border-top: 1px solid var(--border);
+        }
+        .meta-group { display: flex; flex-direction: column; gap: 0.25rem; }
+
+        /* ─── Sticky section nav ─── */
+        .section-nav {
+            position: sticky; top: 0; z-index: 100;
+            background: var(--surface);
+            border-bottom: 1px solid var(--border-heavy);
+            display: flex; gap: 0; overflow-x: auto;
+            scrollbar-width: none;
+        }
+        .section-nav::-webkit-scrollbar { display: none; }
+        .section-nav a {
+            font-family: var(--font-mono); font-size: 0.7rem;
+            text-transform: uppercase; letter-spacing: 0.04em;
+            color: var(--text-muted); text-decoration: none;
+            padding: 0.75rem 1.25rem; white-space: nowrap;
+            border-bottom: 2px solid transparent;
+            transition: all 0.15s;
+        }
+        .section-nav a:hover { color: var(--text-heading); background: var(--surface-alt); }
+        .section-nav a.active { color: var(--rust); border-bottom-color: var(--rust); }
+
+        /* ─── Ledger rows ─── */
+        .ledger-row {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 300px;
+            border-bottom: 1px solid var(--border-heavy);
+            scroll-margin-top: 42px;
+        }
+        .main-col {
+            padding: 3rem;
+            border-right: 1px solid var(--border-heavy);
+            min-width: 0;
+        }
+        .margin-col {
+            padding: 3rem 1.5rem;
+            background: var(--surface);
+            min-width: 0;
+        }
+
+        @media (max-width: 1024px) {
+            .ledger-row { grid-template-columns: 1fr; }
+            .main-col { border-right: none; border-bottom: 1px solid var(--border-heavy); padding: 2rem; }
+            .margin-col { padding: 2rem; }
+            h1 { font-size: 2.5rem; }
+        }
+
+        /* ============ COMPONENT CARDS ============ */
+        .component-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 1rem; margin: 1.5rem 0;
+        }
+        .component-card {
+            border: 1px solid var(--border);
+            background: var(--surface); padding: 1rem;
+        }
+        .component-title {
+            font-family: var(--font-mono); font-size: 0.85rem;
+            font-weight: 600; color: var(--text-heading);
+            margin-bottom: 0.4rem;
+            display: flex; justify-content: space-between; align-items: center;
+            border-bottom: 1px dashed var(--border); padding-bottom: 0.4rem;
+        }
+        .component-title span.role {
+            font-family: var(--font-sans); font-size: 0.6rem;
+            color: var(--rust); text-transform: uppercase;
+        }
+        .component-desc {
+            font-size: 0.82rem; color: var(--text-muted);
+            line-height: 1.5; margin-bottom: 0;
+        }
+
+        /* ============ API TABLE ============ */
+        .api-table-wrap {
+            overflow-x: auto; margin: 1.5rem 0;
+            -webkit-overflow-scrolling: touch;
+        }
+        .api-table {
+            width: 100%; border-collapse: collapse;
+            font-size: 0.85rem; min-width: 540px;
+        }
+        .api-table th {
+            font-family: var(--font-mono); font-size: 0.7rem;
+            text-transform: uppercase; letter-spacing: 0.05em;
+            color: var(--text-muted); text-align: left;
+            padding: 0.6rem 0.8rem; border-bottom: 2px solid var(--border-heavy);
+            background: var(--surface-alt);
+        }
+        .api-table td {
+            padding: 0.5rem 0.8rem;
+            border-bottom: 1px solid var(--border);
+            vertical-align: top;
+        }
+        .api-table tr:hover td { background: var(--surface); }
+        .method-badge {
+            font-family: var(--font-mono); font-size: 0.7rem;
+            font-weight: 600; display: inline-block;
+            padding: 0.1em 0.4em; border-radius: 2px;
+        }
+        .method-get { color: var(--slate); background: var(--slate-dim); }
+        .method-post { color: var(--brass); background: var(--brass-dim); }
+        .method-delete { color: var(--rust); background: var(--rust-dim); }
+        .method-ws { color: var(--slate); background: var(--slate-dim); }
+
+        /* ============ CODE BLOCKS ============ */
+        .file-block {
+            background: var(--bg); border: 1px solid var(--border);
+            margin: 1.5rem 0; font-family: var(--font-mono); font-size: 0.82rem;
+        }
+        .file-header {
+            background: var(--surface-alt); padding: 0.5rem 1rem;
+            border-bottom: 1px solid var(--border);
+        }
+        .file-content {
+            padding: 1rem; white-space: pre-wrap;
+            color: var(--slate); overflow-x: auto;
+        }
+
+        /* ============ ANNOTATIONS ============ */
+        .annotation {
+            margin-bottom: 2rem; font-size: 0.9rem;
+            padding-bottom: 2rem; border-bottom: 1px dashed var(--border-heavy);
+        }
+        .annotation:last-child { border-bottom: none; padding-bottom: 0; margin-bottom: 0; }
+        .annotation-title {
+            font-family: var(--font-sans); font-weight: 700;
+            text-transform: uppercase; font-size: 0.7rem;
+            letter-spacing: 0.05em; color: var(--rust);
+            margin-bottom: 0.5rem;
+            display: flex; align-items: center; gap: 0.5rem;
+        }
+        .annotation-title::before { content: '■'; font-size: 0.5rem; }
+        .annotation-title.slate { color: var(--slate); }
+        .annotation p { color: var(--text-muted); line-height: 1.5; margin-bottom: 0; }
+
+        /* ============ MERMAID ZOOM ============ */
+        .mermaid-wrap {
+            position: relative; background: var(--surface);
+            border: 1px solid var(--border); border-radius: 12px;
+            padding: 32px 24px; overflow: auto;
+            scrollbar-width: thin; scrollbar-color: var(--border) transparent;
+            margin-bottom: 2rem;
+        }
+        .mermaid-wrap::-webkit-scrollbar { width: 6px; height: 6px; }
+        .mermaid-wrap::-webkit-scrollbar-track { background: transparent; }
+        .mermaid-wrap::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+        .mermaid-wrap::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+        .mermaid-wrap .mermaid { transition: transform 0.2s ease; transform-origin: top center; }
+        .zoom-controls {
+            position: absolute; top: 8px; right: 8px;
+            display: flex; gap: 2px; z-index: 10;
+            background: var(--surface); border: 1px solid var(--border);
+            border-radius: 6px; padding: 2px;
+        }
+        .zoom-controls button {
+            width: 28px; height: 28px; border: none;
+            background: transparent; color: var(--text-muted);
+            font-family: var(--font-mono); font-size: 14px;
+            cursor: pointer; border-radius: 4px;
+            display: flex; align-items: center; justify-content: center;
+            transition: background 0.15s ease, color 0.15s ease;
+        }
+        .zoom-controls button:hover { background: var(--border); color: var(--text-heading); }
+        .mermaid-wrap.is-zoomed { cursor: grab; }
+        .mermaid-wrap.is-panning { cursor: grabbing; user-select: none; }
+
+        /* Mermaid SVG overrides */
+        .mermaid .nodeLabel { color: var(--text-main) !important; }
+        .mermaid .edgeLabel { color: var(--text-muted) !important; background-color: var(--bg) !important; }
+        .mermaid .edgeLabel rect { fill: var(--bg) !important; }
+
+        @media (prefers-reduced-motion: reduce) {
+            .mermaid-wrap .mermaid { transition: none; }
+        }
+
+        /* ============ SECTION HEADERS ============ */
+        .section-head {
+            margin-top: 2rem; border-bottom: 1px solid var(--border);
+            padding-bottom: 0.5rem; margin-bottom: 1rem;
+        }
+
+        /* ============ LIST ITEMS (no flex on li) ============ */
+        ul.technical-list { list-style: none; margin-left: 0; margin-bottom: 2rem; }
+        ul.technical-list li { position: relative; padding-left: 1.5rem; margin-bottom: 0.75rem; }
+        ul.technical-list li::before {
+            content: '›'; position: absolute; left: 0;
+            color: var(--rust); font-weight: bold; font-family: var(--font-mono);
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="doc-wrapper">
+        <header class="doc-header">
+            <div class="sans-label" style="margin-bottom: 1rem;">System Documentation</div>
+            <h1>Rig Architecture Logbook</h1>
+            <p style="font-size: 1.15rem; color: var(--text-muted); max-width: 800px;">
+                Complete mechanical reference of the Rig dispatch console — covering the React SPA, Fastify proxy,
+                <code>pi</code> subprocess bridge, every component, every endpoint, and every data flow.
+            </p>
+
+            <div class="meta-line mono" style="font-size: 0.8rem;">
+                <div class="meta-group">
+                    <span class="sans-label">Binary Target</span>
+                    <span style="color: var(--text-heading)">pi --mode rpc (Node.js CLI, Stdio IPC)</span>
+                </div>
+                <div class="meta-group">
+                    <span class="sans-label">Proxy Engine</span>
+                    <span style="color: var(--text-heading)">Fastify 5 + @fastify/websocket (:3100)</span>
+                </div>
+                <div class="meta-group">
+                    <span class="sans-label">Presentation Shell</span>
+                    <span style="color: var(--text-heading)">React 19 + Vite SPA (:5173)</span>
+                </div>
+                <div class="meta-group">
+                    <span class="sans-label">Session Storage</span>
+                    <span style="color: var(--text-heading)">~/.pi/agent/sessions/ (JSONL)</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- ═══ STICKY NAV ═══ -->
+        <nav class="section-nav" id="toc">
+            <a href="#s1">1. Topology</a>
+            <a href="#s2">2. Frontend</a>
+            <a href="#s3">3. Server</a>
+            <a href="#s4">4. API</a>
+            <a href="#s5">5. Dispatch Lifecycle</a>
+            <a href="#s6">6. Stream Protocol</a>
+        </nav>
+
+        <!-- ═══════════════════════════════════════════════════════════════════
+             SEC 1: SYSTEM TOPOLOGY
+             ═══════════════════════════════════════════════════════════════════ -->
+        <article class="ledger-row" id="s1">
+            <div class="main-col">
+                <div class="sans-label">01. System Topology</div>
+                <h2>Three Hard Boundaries</h2>
+                <p>
+                    Rig runs across three decoupled layers: a static React SPA (the presentation shell), a Node.js
+                    Fastify server (the state-holding proxy), and <code>pi</code> child processes (the agent execution
+                    engine). The server never imports <code>pi</code> as a library — it discovers it via
+                    <code>which pi</code> and spawns it with <code>spawn()</code> from <code>node:child_process</code>.
+                    This means Rig is structurally immune to internal changes within the agent, so long as the RPC
+                    protocol contract is upheld.
+                </p>
+
+                <div class="mermaid-wrap">
+                    <div class="zoom-controls">
+                        <button onclick="zoomDiagram(this, 1.2)" title="Zoom in">+</button>
+                        <button onclick="zoomDiagram(this, 0.8)" title="Zoom out">&minus;</button>
+                        <button onclick="resetZoom(this)" title="Reset zoom">&#8634;</button>
+                    </div>
+                    <pre class="mermaid">
+graph LR
+    subgraph Frontend [" React 19 SPA (:5173) "]
+        APP["App.tsx — Router + State"]
+        BOARD["Board.tsx — Session List"]
+        LOG["SessionLog.tsx — Work Log"]
+        HOOK["useSessionBridge — WS Hook"]
+    end
+
+    subgraph Server [" Fastify Proxy (:3100) "]
+        ROUTES["routes.ts — REST + WS"]
+        BRIDGE["pi-bridge.ts — Process Manager"]
+        STORE["session-store.ts — JSONL Reader"]
+        FTRACK["file-tracker.ts — Edit Tracker"]
+    end
+
+    subgraph PiLayer [" Pi Subprocess "]
+        PI["pi --mode rpc"]
+        SESS[("~/.pi/agent/sessions/")]
+        CONF[("settings.json")]
+    end
+
+    APP -->|"REST /api/*"| ROUTES
+    HOOK <-->|"WebSocket /api/ws/:id"| ROUTES
+    ROUTES -->|"spawn + stdin"| BRIDGE
+    BRIDGE -->|"spawn()"| PI
+    PI -->|"stdout JSONL"| BRIDGE
+    STORE -->|"readFile"| SESS
+    ROUTES -->|"readPiSettings()"| CONF
+    PI -->|"write"| SESS
+                    </pre>
+                </div>
+
+                <h3 class="section-head">File Structure</h3>
+                <div class="file-block">
+                    <div class="file-header"><span class="mono">Project Layout</span></div>
+                    <div class="file-content">rig/
+├── frontend/src/
+│   ├── components/      # 11 React components
+│   │   ├── Board.tsx, SessionLog.tsx, EmptyDetail.tsx
+│   │   ├── NewDispatch.tsx, ModelPicker.tsx, FolderPicker.tsx
+│   │   ├── ToolCallLine.tsx, FilesPanel.tsx, StatusDot.tsx
+│   │   ├── ProjectBadge.tsx, ExtensionRequest.tsx
+│   ├── hooks/           # useSessionBridge.ts (live WS hook)
+│   ├── lib/             # api.ts (server client), utils.ts
+│   ├── types/           # TypeScript type definitions
+│   ├── App.tsx          # Root — global state + layout
+│   └── index.css        # Tailwind 4 theme tokens
+└── server/src/
+    ├── index.ts         # Fastify entry, CORS, static serving
+    ├── routes.ts        # REST + WebSocket route handlers
+    ├── pi-bridge.ts     # Spawn + manage pi child processes
+    ├── pi-config.ts     # Read pi's settings.json (models, defaults)
+    ├── config.ts        # Rig config (project registry, port)
+    ├── session-store.ts # Parse JSONL session files for listing
+    └── file-tracker.ts  # Track files from tool_execution_start events</div>
+                </div>
+            </div>
+
+            <aside class="margin-col">
+                <div class="annotation">
+                    <div class="annotation-title slate">ADR: Decoupled Binary Execution</div>
+                    <p>Rig strictly avoids importing the agent via npm. It resolves the binary through the OS path
+                        (<code>which pi</code>) and communicates exclusively over stdin/stdout JSON lines. This
+                        guarantees Rig works with whatever <code>pi</code> version is installed globally.</p>
+                </div>
+                <div class="annotation">
+                    <div class="annotation-title slate">ADR: Dual Config Files</div>
+                    <p><code>pi-config.ts</code> reads Pi's own <code>settings.json</code> (models, defaults,
+                        thinking level) — <strong>read-only</strong>, never written. <code>config.ts</code> manages
+                        Rig's own config at <code>~/.pi/agent/rig.json</code> (project registry, port). Changes to
+                        model selection go through Pi's RPC protocol, not file writes.</p>
+                </div>
+                <div class="annotation">
+                    <div class="annotation-title slate">ADR: Session Store Direct Read</div>
+                    <p>When the Board loads, the server does not boot a Pi process. <code>session-store.ts</code>
+                        reads JSONL files directly from <code>~/.pi/agent/sessions/</code>, parsing each file to
+                        extract headers and metadata (first user message, model, message count). The
+                        <code>discoverProjects()</code> function skims only the first line of one file per directory
+                        for fast project enumeration.</p>
+                </div>
+            </aside>
+        </article>
+
+        <!-- ═══════════════════════════════════════════════════════════════════
+             SEC 2: FRONTEND ARCHITECTURE
+             ═══════════════════════════════════════════════════════════════════ -->
+        <article class="ledger-row" id="s2">
+            <div class="main-col">
+                <div class="sans-label">02. Frontend Architecture</div>
+                <h2>The Operations Ledger</h2>
+                <p>
+                    The React SPA operates as a dispatch console, not a chatbot. Sessions are work orders. Tool calls
+                    are first-class log entries — not hidden behind collapsibles. The Board shows all sessions across
+                    all projects in one flat list. Active sessions pulse. Completed sessions are calm.
+                </p>
+                <p>
+                    Stack: <strong>React 19 + TypeScript + Vite + Tailwind CSS 4</strong>. Fonts: Bricolage Grotesque
+                    (UI/headings via <code>font-ui</code>), IBM Plex Mono (code/labels via <code>font-mono</code>).
+                    Icons: <code>lucide-react</code>. Color: warm charcoal + amber accent. Dark mode is primary.
+                </p>
+
+                <h3 class="section-head">Core Views</h3>
+                <div class="component-grid">
+                    <div class="component-card">
+                        <div class="component-title">App.tsx <span class="role">Root</span></div>
+                        <p class="component-desc">Global state anchor. Fetches sessions, projects, and models on
+                            mount (polling every 10s). Manages session selection, dispatch flow, and the
+                            <code>useSessionBridge</code> hook for live sessions. Desktop: master-detail layout.
+                            Mobile: push-navigation.</p>
+                    </div>
+                    <div class="component-card">
+                        <div class="component-title">Board.tsx <span class="role">Session List</span></div>
+                        <p class="component-desc">Flat unified list of all sessions across all projects, newest
+                            first. Active sessions cluster at top. Search bar filters by project name or prompt text.
+                            Each row shows project badge, task summary, status dot, and relative timestamp.</p>
+                    </div>
+                    <div class="component-card">
+                        <div class="component-title">SessionLog.tsx <span class="role">Work Log</span></div>
+                        <p class="component-desc">The core rendering engine. Maps JSONL events into a sequential
+                            timeline of directives (user prompts), agent prose (markdown), and tool call log lines.
+                            Supports streaming with a live cursor. Includes model selector, thinking level toggle,
+                            stop/resume controls, and message input.</p>
+                    </div>
+                    <div class="component-card">
+                        <div class="component-title">EmptyDetail.tsx <span class="role">Empty State</span></div>
+                        <p class="component-desc">Rich empty state shown when no session is selected. Displays a
+                            system status readiness panel (project count, model count), schematic SVG, and a CTA to
+                            dispatch new work.</p>
+                    </div>
+                </div>
+
+                <h3 class="section-head">Dispatch &amp; Configuration</h3>
+                <div class="component-grid">
+                    <div class="component-card">
+                        <div class="component-title">NewDispatch.tsx <span class="role">Dispatch Modal</span></div>
+                        <p class="component-desc">Bottom sheet (mobile) / modal (desktop). Project selector,
+                            message input (auto-focus), model selector. Dispatches via <code>POST /api/dispatch</code>.
+                            Creates a placeholder session immediately — Pi doesn't flush the session file until the
+                            first assistant message.</p>
+                    </div>
+                    <div class="component-card">
+                        <div class="component-title">ModelPicker.tsx <span class="role">Model Selector</span></div>
+                        <p class="component-desc">Popover menu for model selection. Searchable list of enabled
+                            models (shortcuts). "Show all" expands to the full registry grouped by provider, fetched
+                            via <code>GET /api/models/all</code>. Two-line layout: display name + model ID.</p>
+                    </div>
+                    <div class="component-card">
+                        <div class="component-title">FolderPicker.tsx <span class="role">Directory Browser</span>
+                        </div>
+                        <p class="component-desc">Server-side filesystem browser for selecting project directories.
+                            Uses <code>GET /api/browse</code> to traverse the host filesystem. Supports navigation up
+                            to parent directories. Hidden dotfiles are filtered.</p>
+                    </div>
+                </div>
+
+                <h3 class="section-head">Log Elements &amp; UI Primitives</h3>
+                <div class="component-grid">
+                    <div class="component-card">
+                        <div class="component-title">ToolCallLine.tsx <span class="role">Log Entry</span></div>
+                        <p class="component-desc">Compact colored log line per tool call. Color-coded by operation:
+                            read (blue), edit (amber), write (green), bash (violet). Shows timestamp, tool name,
+                            and file path or command. The design hook — tool calls ARE the work.</p>
+                    </div>
+                    <div class="component-card">
+                        <div class="component-title">FilesPanel.tsx <span class="role">Side Panel</span></div>
+                        <p class="component-desc">Collapsible panel showing files touched in the current session.
+                            Desktop: side panel. Sorted by most recently touched. Extracted from
+                            <code>tool_execution_start</code> events.</p>
+                    </div>
+                    <div class="component-card">
+                        <div class="component-title">StatusDot.tsx <span class="role">Indicator</span></div>
+                        <p class="component-desc">Running: amber pulse animation. Done: static green. Error: red.
+                            Used in Board session rows and session detail header.</p>
+                    </div>
+                    <div class="component-card">
+                        <div class="component-title">ProjectBadge.tsx <span class="role">Badge</span></div>
+                        <p class="component-desc">Deterministic color derived from project path hash — each project
+                            always gets the same color. Users recognize projects by color before reading the name.</p>
+                    </div>
+                    <div class="component-card">
+                        <div class="component-title">ExtensionRequest.tsx <span class="role">Modal</span></div>
+                        <p class="component-desc">Modal overlay for interactive Pi extension requests: confirm,
+                            select, input, and editor dialogs. Responses are sent back via
+                            <code>extension_ui_response</code> WebSocket messages.</p>
+                    </div>
+                </div>
+
+                <h3 class="section-head">Hooks &amp; Library</h3>
+                <div class="component-grid">
+                    <div class="component-card">
+                        <div class="component-title">useSessionBridge.ts <span class="role">Hook</span></div>
+                        <p class="component-desc">The critical live session hook. Manages WebSocket connection to
+                            <code>/api/ws/:bridgeId</code>. Processes RPC events (<code>message_start</code>,
+                            <code>message_update</code>, <code>tool_execution_start/end</code>,
+                            <code>extension_ui_request</code>) into log entries. Handles event replay from the
+                            server's buffer on connect. Tracks thinking level and touched files.</p>
+                    </div>
+                    <div class="component-card">
+                        <div class="component-title">api.ts <span class="role">Client</span></div>
+                        <p class="component-desc">Server API client. Typed fetch wrappers for all REST endpoints.
+                            Time formatting (<code>timeAgo</code>), model display name shortening, WebSocket URL
+                            construction. Uses relative URLs for Vite dev proxy compatibility.</p>
+                    </div>
+                </div>
+            </div>
+
+            <aside class="margin-col">
+                <div class="annotation">
+                    <div class="annotation-title slate">Design: Work Log, Not Chat</div>
+                    <p>Sessions are displayed as a work log, not a conversation. User prompts are "directives" with
+                        minimal styling. Agent work is shown as tool call log lines interspersed with prose. No chat
+                        bubbles, no avatars, no "typing..." indicators. The agent is a tool, not a peer.</p>
+                </div>
+                <div class="annotation">
+                    <div class="annotation-title slate">Design: The Board</div>
+                    <p>Home screen is a flat, unified board of all recent dispatches across all projects — like a
+                        departures board at a train station. Projects are a filter, not a navigational level. This
+                        serves the async workflow: check the board, see what's done, dispatch new work.</p>
+                </div>
+                <div class="annotation">
+                    <div class="annotation-title slate">Placeholder Sessions</div>
+                    <p>When dispatching, a placeholder <code>Session</code> is immediately inserted into the list.
+                        Pi doesn't flush the session file to disk until the first assistant message arrives, so the
+                        placeholder bridges the gap. It's retained by a merge filter in <code>loadData()</code>
+                        until the real file appears.</p>
+                </div>
+                <div class="annotation">
+                    <div class="annotation-title">Limit: Polling</div>
+                    <p>Session list refreshes on a 10-second <code>setInterval</code> poll. There's no push
+                        mechanism for session list updates — only the active session gets live WebSocket events.
+                        A newly completed session takes up to 10 seconds to update its status in the Board.</p>
+                </div>
+            </aside>
+        </article>
+
+        <!-- ═══════════════════════════════════════════════════════════════════
+             SEC 3: SERVER ARCHITECTURE
+             ═══════════════════════════════════════════════════════════════════ -->
+        <article class="ledger-row" id="s3">
+            <div class="main-col">
+                <div class="sans-label">03. Server Architecture</div>
+                <h2>The Fastify Proxy</h2>
+                <p>
+                    An intermediary Node.js server holding live session state between the browser and the Pi agent
+                    process. Handles raw terminal IO proxying, session file reading, config management, and file
+                    tracking.
+                </p>
+
+                <h3 class="section-head">Entry &amp; Configuration</h3>
+                <div class="component-grid">
+                    <div class="component-card">
+                        <div class="component-title">index.ts <span class="role">Entry Point</span></div>
+                        <p class="component-desc">Fastify server startup. Registers CORS, WebSocket, and static
+                            file plugins. Serves built frontend from <code>frontend/dist/</code> with SPA fallback.
+                            Graceful shutdown: calls <code>killAll()</code> to terminate all Pi processes on
+                            SIGINT/SIGTERM.</p>
+                    </div>
+                    <div class="component-card">
+                        <div class="component-title">config.ts <span class="role">Rig Config</span></div>
+                        <p class="component-desc">Manages <code>~/.pi/agent/rig.json</code> — the project registry
+                            and server port (default 3100). CRUD operations for projects. Read/write.</p>
+                    </div>
+                    <div class="component-card">
+                        <div class="component-title">pi-config.ts <span class="role">Pi Settings</span></div>
+                        <p class="component-desc">Reads Pi's <code>settings.json</code> — enabled models, default
+                            provider/model, thinking level. Read-only. Also exports
+                            <code>getSessionsDir()</code> for session file discovery.</p>
+                    </div>
+                </div>
+
+                <h3 class="section-head">Core Services</h3>
+                <div class="component-grid">
+                    <div class="component-card">
+                        <div class="component-title">pi-bridge.ts <span class="role">Process Manager</span></div>
+                        <p class="component-desc">Spawns <code>pi --mode rpc</code> child processes via
+                            <code>spawn()</code> from <code>node:child_process</code>. Manages a
+                            <code>pendingRequests</code> Map for request-response correlation over stdio. A
+                            <code>readline</code> interface on stdout parses JSON lines — responses match pending
+                            request IDs, everything else emits as events. Handles process lifecycle: SIGTERM on
+                            stop, SIGKILL after 2000ms fallback.</p>
+                    </div>
+                    <div class="component-card">
+                        <div class="component-title">routes.ts <span class="role">REST + WS</span></div>
+                        <p class="component-desc">All HTTP routes and WebSocket handler. The <code>registerSession()</code>
+                            function wires bridge events to WS clients with an <code>eventBuffer</code> for the
+                            dispatch-to-WS race condition. Holds an <code>activeSessions</code> Map binding bridge
+                            IDs to live <code>{ bridge, fileTracker, wsClients, eventBuffer }</code> objects.</p>
+                    </div>
+                    <div class="component-card">
+                        <div class="component-title">session-store.ts <span class="role">JSONL Reader</span></div>
+                        <p class="component-desc">Reads Pi's JSONL session files to build the Board listing. Parses
+                            each file fully to extract: session header, first user message, message count, last model,
+                            thinking level, and modified time. Supports per-project listing via Pi's
+                            encoded-cwd directory structure.</p>
+                    </div>
+                    <div class="component-card">
+                        <div class="component-title">file-tracker.ts <span class="role">Edit Tracker</span></div>
+                        <p class="component-desc">Passively intercepts <code>tool_execution_start</code> events to
+                            track files touched by <code>read</code>, <code>edit</code>, and <code>write</code> tools.
+                            Maintains a per-session Map of file paths to actions and timestamps.
+                            <code>bash</code> commands are intentionally excluded.</p>
+                    </div>
+                </div>
+            </div>
+
+            <aside class="margin-col">
+                <div class="annotation">
+                    <div class="annotation-title slate">State Architecture</div>
+                    <p>The <code>activeSessions</code> Map in <code>routes.ts</code> is the central state holder.
+                        Each entry binds a bridge ID to a live <code>ChildProcess</code>, a set of WebSocket
+                        clients, a <code>FileTracker</code> instance, and an event buffer. This state is entirely
+                        in-memory — there is no persistence layer for active sessions beyond Pi's own JSONL files.</p>
+                </div>
+                <div class="annotation">
+                    <div class="annotation-title">Limit: Vertical Node Lock</div>
+                    <p>Because the <code>activeSessions</code> Map binds WebSocket descriptors against native
+                        <code>ChildProcess</code> objects in RAM, Rig cannot scale horizontally. Load-balancing
+                        across multiple instances would fail — Server B cannot reach Server A's live processes.</p>
+                </div>
+                <div class="annotation">
+                    <div class="annotation-title">Limit: False Positive Tracking</div>
+                    <p><code>file-tracker.ts</code> acts purely on <em>intent</em>. It maps from
+                        <code>tool_execution_start</code> payloads without cross-checking
+                        <code>tool_execution_end</code> success status. A hallucinated tool path or a failed
+                        operation will still generate an "Edited" entry in the UI.</p>
+                </div>
+            </aside>
+        </article>
+
+        <!-- ═══════════════════════════════════════════════════════════════════
+             SEC 4: API REFERENCE
+             ═══════════════════════════════════════════════════════════════════ -->
+        <article class="ledger-row" id="s4">
+            <div class="main-col">
+                <div class="sans-label">04. API Reference</div>
+                <h2>Complete Endpoint Map</h2>
+                <p>
+                    All REST and WebSocket endpoints exposed by the Fastify server on port 3100.
+                </p>
+
+                <div class="api-table-wrap">
+                <table class="api-table">
+                    <thead>
+                        <tr>
+                            <th>Method</th>
+                            <th>Path</th>
+                            <th>Description</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><span class="method-badge method-get">GET</span></td>
+                            <td><code>/api/health</code></td>
+                            <td>Health check — returns <code>{ status, timestamp }</code></td>
+                        </tr>
+                        <tr>
+                            <td><span class="method-badge method-get">GET</span></td>
+                            <td><code>/api/sessions</code></td>
+                            <td>List all sessions (optional <code>?cwd=</code> filter). Includes
+                                <code>isActive</code> and <code>bridgeId</code> for live sessions.</td>
+                        </tr>
+                        <tr>
+                            <td><span class="method-badge method-get">GET</span></td>
+                            <td><code>/api/sessions/:id/entries</code></td>
+                            <td>Read raw JSONL entries for a session. Requires <code>?path=</code> query param.</td>
+                        </tr>
+                        <tr>
+                            <td><span class="method-badge method-get">GET</span></td>
+                            <td><code>/api/models</code></td>
+                            <td>Enabled models + default from Pi's <code>settings.json</code>.</td>
+                        </tr>
+                        <tr>
+                            <td><span class="method-badge method-get">GET</span></td>
+                            <td><code>/api/models/all</code></td>
+                            <td>Full model registry from Pi's runtime. Queries an active bridge or spawns a temporary
+                                Pi process. Cached after first fetch.</td>
+                        </tr>
+                        <tr>
+                            <td><span class="method-badge method-get">GET</span></td>
+                            <td><code>/api/settings</code></td>
+                            <td>Raw Pi settings (pass-through of <code>settings.json</code>).</td>
+                        </tr>
+                        <tr>
+                            <td><span class="method-badge method-get">GET</span></td>
+                            <td><code>/api/projects</code></td>
+                            <td>Registered projects (merged with auto-discovered projects from session history).</td>
+                        </tr>
+                        <tr>
+                            <td><span class="method-badge method-post">POST</span></td>
+                            <td><code>/api/projects</code></td>
+                            <td>Register a project. Body: <code>{ path, name }</code>.</td>
+                        </tr>
+                        <tr>
+                            <td><span class="method-badge method-delete">DEL</span></td>
+                            <td><code>/api/projects</code></td>
+                            <td>Remove a project. Body: <code>{ path }</code>.</td>
+                        </tr>
+                        <tr>
+                            <td><span class="method-badge method-get">GET</span></td>
+                            <td><code>/api/browse</code></td>
+                            <td>Browse server filesystem directories. Optional <code>?path=</code> (defaults to
+                                <code>$HOME</code>). Returns subdirectories (hidden files excluded).</td>
+                        </tr>
+                        <tr>
+                            <td><span class="method-badge method-post">POST</span></td>
+                            <td><code>/api/dispatch</code></td>
+                            <td>Spawn a new Pi session. Body: <code>{ cwd, message, provider?, model? }</code>.
+                                Returns <code>{ bridgeId, sessionId, sessionFile }</code>.</td>
+                        </tr>
+                        <tr>
+                            <td><span class="method-badge method-post">POST</span></td>
+                            <td><code>/api/resume</code></td>
+                            <td>Resume an existing session. Body: <code>{ sessionFile, cwd }</code>. Returns
+                                <code>{ bridgeId }</code>. Returns <code>alreadyActive: true</code> if session is
+                                already running.</td>
+                        </tr>
+                        <tr>
+                            <td><span class="method-badge method-post">POST</span></td>
+                            <td><code>/api/stop</code></td>
+                            <td>Kill an active session. Body: <code>{ bridgeId }</code>.</td>
+                        </tr>
+                        <tr>
+                            <td><span class="method-badge method-get">GET</span></td>
+                            <td><code>/api/active</code></td>
+                            <td>List all active Pi bridges with their state (cwd, alive, WS client count, tracked
+                                files).</td>
+                        </tr>
+                        <tr>
+                            <td><span class="method-badge method-ws">WS</span></td>
+                            <td><code>/api/ws/:bridgeId</code></td>
+                            <td>Live session WebSocket. Server sends: <code>state</code>, <code>files</code>,
+                                <code>event</code> (buffered replay + live), <code>exit</code>. Client sends:
+                                <code>command</code>, <code>extension_ui_response</code>.</td>
+                        </tr>
+                    </tbody>
+                </table>
+                </div>
+            </div>
+
+            <aside class="margin-col">
+                <div class="annotation">
+                    <div class="annotation-title slate">WebSocket Protocol</div>
+                    <p><strong>Server → Client:</strong></p>
+                    <p style="margin-bottom: 0.5rem; font-size: 0.82rem;"><code>{ type: "state", data }</code> —
+                        session state on connect<br>
+                        <code>{ type: "files", files }</code> — tracked files on connect<br>
+                        <code>{ type: "event", event }</code> — Pi RPC events (buffered + live)<br>
+                        <code>{ type: "exit", code, signal }</code> — process termination<br>
+                        <code>{ type: "response", requestId, data }</code> — command response</p>
+                    <p style="margin-top: 0.75rem;"><strong>Client → Server:</strong></p>
+                    <p style="font-size: 0.82rem;"><code>{ type: "command", command, requestId }</code> — RPC
+                        command (prompt, set_thinking_level, etc.)<br>
+                        <code>{ type: "extension_ui_response", data }</code> — extension dialog response</p>
+                </div>
+                <div class="annotation">
+                    <div class="annotation-title slate">Model Registry Cache</div>
+                    <p><code>/api/models/all</code> is expensive — it either queries an active bridge or spawns a
+                        temporary Pi process. The result is cached in memory (<code>allModelsCache</code>) and never
+                        invalidated until server restart.</p>
+                </div>
+            </aside>
+        </article>
+
+        <!-- ═══════════════════════════════════════════════════════════════════
+             SEC 5: DISPATCH LIFECYCLE
+             ═══════════════════════════════════════════════════════════════════ -->
+        <article class="ledger-row" id="s5">
+            <div class="main-col">
+                <div class="sans-label">05. Execution Flow</div>
+                <h2>The Dispatch Lifecycle</h2>
+                <p>
+                    Rig uses a split sequence to start an agent. <code>POST /api/dispatch</code> spawns the Pi
+                    process, queries its state, and sends the initial prompt — all before returning the HTTP response.
+                    Meanwhile, Pi begins emitting events immediately after spawn.
+                </p>
+                <p>
+                    The frontend needs hundreds of milliseconds to process the HTTP response, swap views, and open a
+                    WebSocket. To prevent losing Pi's initial output, the server caches all events in an
+                    <code>eventBuffer</code> array until the first WebSocket client connects, then flushes the
+                    buffer in order.
+                </p>
+
+                <div class="mermaid-wrap">
+                    <div class="zoom-controls">
+                        <button onclick="zoomDiagram(this, 1.2)" title="Zoom in">+</button>
+                        <button onclick="zoomDiagram(this, 0.8)" title="Zoom out">&minus;</button>
+                        <button onclick="resetZoom(this)" title="Reset zoom">&#8634;</button>
+                    </div>
+                    <pre class="mermaid">
+sequenceDiagram
+    autonumber
+    participant Client as React SPA
+    participant Server as Fastify API
+    participant Bridge as pi-bridge.ts
+    participant Pi as pi --mode rpc
+
+    Client->>Server: POST /api/dispatch
+    Server->>Bridge: spawnPi(cwd, model)
+    Bridge->>Pi: spawn("pi", ["--mode", "rpc"])
+
+    Note right of Pi: Emits immediately
+    Pi-->>Bridge: stdout JSONL events
+    Bridge-->>Server: emit("event", data)
+
+    rect rgba(195, 90, 57, 0.08)
+    Note over Server: No WS clients
+    Server->>Server: eventBuffer.push(data)
+    end
+
+    Server->>Bridge: sendCommand(get_state)
+    Bridge->>Pi: stdin: get_state req
+    Pi-->>Bridge: stdout: response
+    Bridge-->>Server: resolve(state)
+
+    Server->>Bridge: sendCommand(prompt, message)
+    Bridge->>Pi: stdin: prompt req
+    Pi-->>Bridge: stdout: more events
+    Bridge-->>Server: emit("event", data)
+    Server->>Server: eventBuffer.push(data)
+
+    Server-->>Client: 200 OK bridgeId
+
+    Note over Client,Server: WebSocket handshake
+    Client->>Server: WS connect /api/ws/:bridgeId
+    Server-->>Client: flush eventBuffer[]
+    Server->>Server: wsClients.add(socket)
+
+    Pi-->>Bridge: stdout: live events
+    Bridge-->>Server: emit("event", data)
+    Server-->>Client: WS: live event stream
+                    </pre>
+                </div>
+
+                <div class="file-block">
+                    <div class="file-header">
+                        <span class="mono">routes.ts — Event buffer in registerSession()</span>
+                    </div>
+                    <div class="file-content">bridge.events.on("event", (event: any) => {
+    fileTracker.processEvent(event);
+
+    if (wsClients.size === 0) {
+        eventBuffer.push(event);
+    } else {
+        const json = JSON.stringify({ type: "event", event });
+        for (const ws of wsClients) {
+            if (ws.readyState === 1) ws.send(json);
+        }
+    }
+});</div>
+                </div>
+            </div>
+
+            <aside class="margin-col">
+                <div class="annotation">
+                    <div class="annotation-title">Critical: The Race Window</div>
+                    <p>Between the <code>POST /api/dispatch</code> response and the WebSocket connection, Pi may
+                        emit dozens of events (session header, tool definitions, initial processing). Without the
+                        event buffer, these would be lost — the UI would miss the start of the work log.</p>
+                </div>
+                <div class="annotation">
+                    <div class="annotation-title">Buffer Flush</div>
+                    <p>On WebSocket connect, the server replays <em>all</em> buffered events in order, then clears
+                        the buffer (<code>session.eventBuffer = []</code>). Future events route directly to WS
+                        clients. The <code>readyState === 1</code> check prevents writes to closing sockets.</p>
+                </div>
+                <div class="annotation">
+                    <div class="annotation-title">Limit: Shutdown</div>
+                    <p>On server shutdown, <code>killAll()</code> sends SIGTERM to every tracked Pi process.
+                        Each process gets a 2000ms grace period before SIGKILL. All connected WebSocket clients
+                        drop immediately without warning.</p>
+                </div>
+            </aside>
+        </article>
+
+        <!-- ═══════════════════════════════════════════════════════════════════
+             SEC 6: STREAM PROTOCOL
+             ═══════════════════════════════════════════════════════════════════ -->
+        <article class="ledger-row" id="s6" style="border-bottom: none;">
+            <div class="main-col">
+                <div class="sans-label">06. Stream Engineering</div>
+                <h2>Synchronous RPC over Streams</h2>
+                <p>
+                    Standard Unix streams don't inherently map responses to requests. When Fastify queries Pi for
+                    something like <code>get_available_models</code>, it writes raw JSON to an asynchronous pipe
+                    (<code>stdin</code>). There's no built-in way to correlate the response.
+                </p>
+                <p>
+                    <code>pi-bridge.ts</code> constructs a synchronous request-response layer over the async
+                    streams. Every outbound command gets tagged with a unique ID (<code>req_1</code>,
+                    <code>req_2</code>, ...). An active JavaScript Promise <code>resolve()</code> closure is
+                    stored in a <code>pendingRequests</code> Map. A <code>readline</code> loop on
+                    <code>stdout</code> checks every incoming JSON line — if it has a matching
+                    <code>data.id</code>, the corresponding Promise is resolved. Everything else emits as an
+                    event to the WebSocket layer.
+                </p>
+
+                <div class="mermaid-wrap">
+                    <div class="zoom-controls">
+                        <button onclick="zoomDiagram(this, 1.2)" title="Zoom in">+</button>
+                        <button onclick="zoomDiagram(this, 0.8)" title="Zoom out">&minus;</button>
+                        <button onclick="resetZoom(this)" title="Reset zoom">&#8634;</button>
+                    </div>
+                    <pre class="mermaid">
+flowchart TD
+    subgraph BridgeOut ["Outbound (stdin)"]
+        A["sendCommand(bridge, cmd)"] --> B["Tag with id: req_N"]
+        B --> C[("pendingRequests Map")]
+        B --> D["stdin.write(JSON + newline)"]
+    end
+
+    subgraph PiProc ["Pi Process"]
+        D --> E(["Agent event loop"])
+        E --> F["Generate output"]
+        F --> G["stdout line"]
+    end
+
+    subgraph Parser ["Inbound Parser (readline on stdout)"]
+        G --> H{"Valid JSON?"}
+        H -->|No| SKIP["Discard silently"]
+        H -->|Yes| I{"type === response AND id in Map?"}
+        I -->|Yes| J["resolve(data) — Promise completes"]
+        I -->|No| K["events.emit — forward to WS"]
+    end
+                    </pre>
+                </div>
+
+                <h3 class="section-head">The File Tracker Side-Channel</h3>
+                <p>
+                    Alongside the Promise-based RPC, <code>file-tracker.ts</code> passively intercepts all events
+                    flowing through the bridge. It never sends anything back — it's a read-only observer. When it
+                    sees a <code>tool_execution_start</code> event for <code>read</code>, <code>edit</code>, or
+                    <code>write</code> tools, it extracts the file path from the args and adds it to its tracking
+                    Map. The frontend similarly tracks files in <code>useSessionBridge</code> via the same event
+                    type — both server and client maintain parallel file lists.
+                </p>
+
+                <div class="file-block">
+                    <div class="file-header">
+                        <span class="mono">pi-bridge.ts — The readline parser core</span>
+                    </div>
+                    <div class="file-content">rl.on("line", (line) => {
+    try {
+        const data = JSON.parse(line);
+
+        // Response to a pending request?
+        if (data.type === "response" && data.id
+            && bridge.pendingRequests.has(data.id)) {
+            const pending = bridge.pendingRequests.get(data.id)!;
+            bridge.pendingRequests.delete(data.id);
+            clearTimeout(pending.timer);
+            pending.resolve(data);
+            return;
+        }
+
+        // Otherwise it's an event — emit to subscribers
+        bridge.events.emit("event", data);
+    } catch {
+        // Non-JSON line, ignore
+    }
+});</div>
+                </div>
+            </div>
+
+            <aside class="margin-col">
+                <div class="annotation">
+                    <div class="annotation-title">Limit: Parser Fragility</div>
+                    <p>The <code>readline</code> stdout loop demands valid JSON on every line. If the Pi process
+                        panics or logs arbitrary trace strings to standard out, Rig silently swallows the output
+                        inside an empty <code>try/catch</code> block. It will not alert the server until the OS
+                        forces an exit signal on the child process.</p>
+                </div>
+                <div class="annotation">
+                    <div class="annotation-title">Limit: Request Timeout</div>
+                    <p>Every pending request has a 30-second timeout (<code>timeoutMs = 30000</code>). If Pi
+                        doesn't respond within that window, the Promise rejects with a timeout error. On process
+                        exit, all pending requests are bulk-rejected.</p>
+                </div>
+                <div class="annotation">
+                    <div class="annotation-title slate">Event Types from Pi</div>
+                    <p style="font-size: 0.82rem;">
+                        <code>message_start</code> — new user/assistant message<br>
+                        <code>message_update</code> — streaming content delta<br>
+                        <code>message_end</code> — message complete<br>
+                        <code>tool_execution_start</code> — tool invoked with args<br>
+                        <code>tool_execution_end</code> — tool result<br>
+                        <code>thinking_level_change</code> — thinking level updated<br>
+                        <code>extension_ui_request</code> — interactive dialog request
+                    </p>
+                </div>
+            </aside>
+        </article>
+
+    </div>
+
+    <!-- ═══ MERMAID INIT ═══ -->
+    <script type="module">
+        import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+
+        const isDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+
+        mermaid.initialize({
+            startOnLoad: true,
+            theme: 'base',
+            sequence: {
+                actorWidth: 120,
+                noteWidth: 280,
+                width: 200,
+                mirrorActors: true,
+            },
+            themeVariables: {
+                fontFamily: '"IBM Plex Mono", monospace',
+                fontSize: '13px',
+                // Surfaces
+                primaryColor: isDark ? '#302e2d' : '#ebe8e2',
+                primaryBorderColor: isDark ? '#5e5a57' : '#a8a39a',
+                primaryTextColor: isDark ? '#efedea' : '#1e1d1c',
+                secondaryColor: isDark ? '#262524' : '#f5f3ef',
+                secondaryBorderColor: isDark ? '#5e5a57' : '#a8a39a',
+                secondaryTextColor: isDark ? '#efedea' : '#1e1d1c',
+                tertiaryColor: isDark ? '#302e2d' : '#e1ddd5',
+                tertiaryBorderColor: isDark ? '#5e5a57' : '#a8a39a',
+                tertiaryTextColor: isDark ? '#efedea' : '#1e1d1c',
+                // Lines
+                lineColor: isDark ? '#5b7b7a' : '#3d5e5d',
+                // Notes & labels
+                noteBkgColor: isDark ? '#302e2d' : '#f5f3ef',
+                noteTextColor: isDark ? '#efedea' : '#1e1d1c',
+                noteBorderColor: isDark ? '#5e5a57' : '#a8a39a',
+                // Sequence diagram
+                actorBkg: isDark ? '#262524' : '#ebe8e2',
+                actorBorder: isDark ? '#5e5a57' : '#a8a39a',
+                actorTextColor: isDark ? '#efedea' : '#1e1d1c',
+                signalColor: isDark ? '#dcdad7' : '#2c2a29',
+                signalTextColor: isDark ? '#dcdad7' : '#2c2a29',
+                activationBorderColor: isDark ? '#c35a39' : '#b34526',
+                activationBkgColor: isDark ? 'rgba(195, 90, 57, 0.15)' : 'rgba(179, 69, 38, 0.1)',
+                // Subgraphs / clusters
+                clusterBkg: isDark ? 'rgba(195, 90, 57, 0.05)' : 'rgba(179, 69, 38, 0.05)',
+                clusterBorder: isDark ? '#5e5a57' : '#a8a39a',
+            }
+        });
+    </script>
+
+    <!-- ═══ ZOOM + PAN + SCROLL-SPY ═══ -->
+    <script>
+        // Zoom controls
+        function updateZoomState(wrap) {
+            var target = wrap.querySelector('.mermaid');
+            var zoom = parseFloat(target.dataset.zoom || '1');
+            wrap.classList.toggle('is-zoomed', zoom > 1);
+        }
+        function zoomDiagram(btn, factor) {
+            var wrap = btn.closest('.mermaid-wrap');
+            var target = wrap.querySelector('.mermaid');
+            var current = parseFloat(target.dataset.zoom || '1');
+            var next = Math.min(Math.max(current * factor, 0.3), 5);
+            target.dataset.zoom = next;
+            target.style.transform = 'scale(' + next + ')';
+            updateZoomState(wrap);
+        }
+        function resetZoom(btn) {
+            var wrap = btn.closest('.mermaid-wrap');
+            var target = wrap.querySelector('.mermaid');
+            target.dataset.zoom = '1';
+            target.style.transform = 'scale(1)';
+            updateZoomState(wrap);
+        }
+
+        document.querySelectorAll('.mermaid-wrap').forEach(function (wrap) {
+            wrap.addEventListener('wheel', function (e) {
+                if (!e.ctrlKey && !e.metaKey) return;
+                e.preventDefault();
+                var target = wrap.querySelector('.mermaid');
+                var current = parseFloat(target.dataset.zoom || '1');
+                var factor = e.deltaY < 0 ? 1.1 : 0.9;
+                var next = Math.min(Math.max(current * factor, 0.3), 5);
+                target.dataset.zoom = next;
+                target.style.transform = 'scale(' + next + ')';
+                updateZoomState(wrap);
+            }, { passive: false });
+
+            var startX, startY, scrollL, scrollT;
+            wrap.addEventListener('mousedown', function (e) {
+                if (e.target.closest('.zoom-controls')) return;
+                var target = wrap.querySelector('.mermaid');
+                if (parseFloat(target.dataset.zoom || '1') <= 1) return;
+                wrap.classList.add('is-panning');
+                startX = e.clientX; startY = e.clientY;
+                scrollL = wrap.scrollLeft; scrollT = wrap.scrollTop;
+            });
+            window.addEventListener('mousemove', function (e) {
+                if (!wrap.classList.contains('is-panning')) return;
+                wrap.scrollLeft = scrollL - (e.clientX - startX);
+                wrap.scrollTop = scrollT - (e.clientY - startY);
+            });
+            window.addEventListener('mouseup', function () { wrap.classList.remove('is-panning'); });
+        });
+
+        // Scroll spy for section nav
+        (function () {
+            var toc = document.getElementById('toc');
+            var links = toc.querySelectorAll('a');
+            var sections = [];
+            links.forEach(function (link) {
+                var id = link.getAttribute('href').slice(1);
+                var el = document.getElementById(id);
+                if (el) sections.push({ id: id, el: el, link: link });
+            });
+            var observer = new IntersectionObserver(function (entries) {
+                entries.forEach(function (entry) {
+                    if (entry.isIntersecting) {
+                        links.forEach(function (l) { l.classList.remove('active'); });
+                        var match = sections.find(function (s) { return s.el === entry.target; });
+                        if (match) {
+                            match.link.classList.add('active');
+                            match.link.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+                        }
+                    }
+                });
+            }, { rootMargin: '-10% 0px -80% 0px' });
+            sections.forEach(function (s) { observer.observe(s.el); });
+            links.forEach(function (link) {
+                link.addEventListener('click', function (e) {
+                    e.preventDefault();
+                    var id = link.getAttribute('href').slice(1);
+                    var el = document.getElementById(id);
+                    if (el) {
+                        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                        history.replaceState(null, '', '#' + id);
+                    }
+                });
+            });
+        })();
+    </script>
+</body>
+
+</html>
