@@ -11,6 +11,7 @@ import {
   dispatch,
   resume,
   stopSession,
+  modelDisplayName,
 } from "./lib/api";
 import { useSessionBridge } from "./hooks/useSessionBridge";
 import { ExtensionRequest } from "./components/ExtensionRequest";
@@ -53,7 +54,12 @@ export default function App() {
         fetchProjects(),
         fetchModels(),
       ]);
-      setSessions(sessionsData);
+      setSessions((prev) => {
+        // Retain active placeholder sessions whose files haven't been written to disk yet
+        const newIds = new Set(sessionsData.map((s) => s.id));
+        const retained = prev.filter((s) => s.isActive && s.bridgeId && !newIds.has(s.id));
+        return [...retained, ...sessionsData];
+      });
       setProjects(projectsData);
       setModels(modelsData.models);
       setDefaultModel(modelsData.defaultModel);
@@ -210,17 +216,42 @@ export default function App() {
       try {
         setShowDispatch(false);
         const res = await dispatch(projectPath, message, model.provider, model.modelId);
-        if (res.sessionId) {
-          setSelectedSessionId(res.sessionId);
-          setMobileView("session");
-        }
-        await loadData();
+
+        // Create a placeholder session immediately — pi doesn't flush the
+        // session file to disk until the first assistant message arrives, so
+        // loadData() would miss it.  The placeholder is retained by the merge
+        // logic in loadData() until the real file appears on disk.
+        const sessionId = res.sessionId || res.bridgeId;
+        const project = projects.find((p) => p.path === projectPath);
+        const placeholder: Session = {
+          id: sessionId,
+          path: res.sessionFile || "",
+          cwd: projectPath,
+          projectName: project?.name || projectPath.split("/").pop() || "unknown",
+          firstMessage: message.slice(0, 200),
+          status: "running",
+          model: modelDisplayName(model.modelId),
+          modelId: model.modelId,
+          provider: model.provider,
+          timeAgo: "now",
+          messageCount: 1,
+          isActive: true,
+          bridgeId: res.bridgeId,
+          created: new Date().toISOString(),
+          modified: new Date().toISOString(),
+          entries: [],
+          touchedFiles: [],
+        };
+
+        setSessions((prev) => [placeholder, ...prev]);
+        setSelectedSessionId(sessionId);
+        setMobileView("session");
       } catch (err) {
         console.error("Dispatch failed:", err);
         alert("Failed to dispatch: " + err);
       }
     },
-    [loadData],
+    [projects],
   );
 
   const handleSendMessage = useCallback(

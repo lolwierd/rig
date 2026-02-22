@@ -70,7 +70,7 @@ export function Board({
           <button
             key={session.id}
             onClick={() => onSelect(session)}
-            className={`w-full text-left grid items-center gap-3 px-4 py-3 border-b border-border transition-colors cursor-pointer ${
+            className={`group w-full text-left grid items-center gap-3 px-4 py-3 border-b border-border transition-colors cursor-pointer ${
               session.id === selectedId
                 ? "bg-surface-2 border-l-2 border-l-amber"
                 : session.status === "running"
@@ -78,17 +78,15 @@ export function Board({
                   : "hover:bg-surface"
             }`}
             style={{
-              gridTemplateColumns: "auto 1fr auto auto auto",
+              gridTemplateColumns: "auto 1fr auto auto",
             }}
+            title={`${session.name || session.firstMessage}\nModel: ${session.model}\nProvider: ${session.provider}`}
           >
             <ProjectBadge name={session.projectName} />
             <span className="text-[13px] text-text truncate min-w-0">
               {session.name || session.firstMessage}
             </span>
             <StatusDot status={session.status} />
-            <span className="font-mono text-[10px] text-text-muted whitespace-nowrap">
-              {session.model}
-            </span>
             <span className="font-mono text-[10px] text-text-muted whitespace-nowrap text-right min-w-[32px]">
               {session.timeAgo}
             </span>

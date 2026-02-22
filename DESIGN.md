@@ -51,10 +51,11 @@ Three views, but NOT three columns. Rig is mobile-first. The views are:
 ### 1. The Board (Home)
 A flat list of sessions, newest first, across all projects. Each row:
 - Project badge (color-coded, just the name)
-- Task summary (first prompt, truncated)
+- Task summary (first prompt, truncated — prioritized space)
 - Status indicator (●/✓/✕)
-- Model badge
 - Relative timestamp
+
+*Model names are hidden from the list view to maximize space for the task summary. They are revealed on hover or in the session detail view.*
 
 Active sessions cluster at the top. A search bar filters by project or prompt text. The "New" button is prominent — dispatching work should be one tap away.
 
@@ -79,6 +80,13 @@ Not a separate screen — it's a bottom sheet (mobile) or modal (desktop). Quick
 - Message input (auto-focus)
 - Model selector (defaults to your last-used model)
 - "Dispatch" button
+
+**Model Picker Design**:
+- A popover menu that feels like equipment selection.
+- Searchable list of enabled models (shortcuts).
+- "Show all" expands to the full registry grouped by provider.
+- Two-line layout: Display Name (Bricolage) + Model ID (Mono).
+- Amber selection state with checkmark.
 
 Should take <5 seconds from open to sent. This is the core UX — make dispatching work from your phone effortless.
 
