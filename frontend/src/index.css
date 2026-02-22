@@ -1,0 +1,111 @@
+@import url("https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;500;600&display=swap");
+
+@import "tailwindcss";
+
+/* ============================================================
+   RIG DESIGN SYSTEM
+   Dispatch console for the pi coding agent.
+   Warm charcoal + amber. Equipment, not SaaS.
+   ============================================================ */
+
+@theme {
+  --font-ui: "Bricolage Grotesque", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", "SF Mono", Consolas, monospace;
+
+  --color-bg: #0c0c0e;
+  --color-surface: #141416;
+  --color-surface-2: #1a1a1e;
+  --color-surface-3: #222226;
+  --color-border: rgba(255, 255, 255, 0.06);
+  --color-border-bright: rgba(255, 255, 255, 0.1);
+  --color-text: #e8e4de;
+  --color-text-dim: #706b63;
+  --color-text-muted: #4a4740;
+  --color-amber: #d4a054;
+  --color-amber-dim: rgba(212, 160, 84, 0.1);
+  --color-amber-glow: rgba(212, 160, 84, 0.25);
+  --color-green: #7fba6a;
+  --color-green-dim: rgba(127, 186, 106, 0.1);
+  --color-red: #c97064;
+  --color-red-dim: rgba(201, 112, 100, 0.1);
+  --color-blue: #6a9fd4;
+  --color-blue-dim: rgba(106, 159, 212, 0.1);
+  --color-violet: #9a85c4;
+  --color-violet-dim: rgba(154, 133, 196, 0.1);
+}
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+  }
+
+  body {
+    font-family: var(--font-ui);
+    background: var(--color-bg);
+    color: var(--color-text);
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Scrollbar styling */
+  ::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-surface-3);
+    border-radius: 2px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--color-text-muted);
+  }
+}
+
+/* Animations */
+@keyframes pulse-glow {
+  0%,
+  100% {
+    opacity: 1;
+    box-shadow: 0 0 4px var(--color-amber-glow);
+  }
+  50% {
+    opacity: 0.6;
+    box-shadow: 0 0 12px var(--color-amber-glow);
+  }
+}
+
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+@keyframes slide-up {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
