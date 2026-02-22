@@ -6,11 +6,13 @@
     <string>com.lolwierd.rig</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/Users/lolwierd/.nvm/versions/node/v25.2.1/bin/npm</string>
+        <!-- Replace with your node/npm path: run `which npm` -->
+        <string>/usr/local/bin/npm</string>
         <string>start</string>
     </array>
     <key>WorkingDirectory</key>
-    <string>/Users/lolwierd/Projects/personal/rig/server</string>
+    <!-- Replace with the absolute path to rig/server on your machine -->
+    <string>/path/to/rig/server</string>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
@@ -22,7 +24,8 @@
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
-        <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/Users/lolwierd/.nvm/versions/node/v25.2.1/bin</string>
+        <!-- Ensure the directory containing `node` and `pi` is included -->
+        <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
     </dict>
 </dict>
 </plist>

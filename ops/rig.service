@@ -4,9 +4,12 @@ After=network.target
 
 [Service]
 Type=simple
-User=lolwierd
-WorkingDirectory=/Users/lolwierd/Projects/personal/rig/server
-ExecStart=/Users/lolwierd/.nvm/versions/node/v25.2.1/bin/npm start
+# Replace with your username
+User=YOUR_USER
+# Replace with the absolute path to rig/server on your machine
+WorkingDirectory=/path/to/rig/server
+# Replace with your npm path: run `which npm`
+ExecStart=/usr/local/bin/npm start
 Restart=always
 Environment=NODE_ENV=production
 
