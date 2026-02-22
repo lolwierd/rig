@@ -12,10 +12,11 @@ import {
   resume,
   stopSession,
   modelDisplayName,
+  fetchModelCapabilities,
 } from "./lib/api";
 import { useSessionBridge } from "./hooks/useSessionBridge";
 import { ExtensionRequest } from "./components/ExtensionRequest";
-import type { Session, ModelInfo, Project, LogEntry, TouchedFile } from "./types";
+import type { Session, ModelInfo, Project, LogEntry, TouchedFile, ThinkingLevel } from "./types";
 
 // Stable empty arrays to avoid re-render loops in hooks
 const EMPTY_ENTRIES: LogEntry[] = [];
@@ -32,28 +33,41 @@ export default function App() {
   const [showFilesPanel, setShowFilesPanel] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [serverOnline, setServerOnline] = useState(true);
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
+  const [lastSyncAt, setLastSyncAt] = useState<number | null>(null);
   const [mobileView, setMobileView] = useState<"board" | "session">("board");
 
   // Cache for loaded session content (keyed by session file path)
   const [sessionCache, setSessionCache] = useState<
     Record<string, { entries: LogEntry[]; files: TouchedFile[] }>
   >({});
+  const [modelThinkingLevels, setModelThinkingLevels] = useState<Record<string, ThinkingLevel[]>>({});
 
   const selectedSession = useMemo(
     () => sessions.find((s) => s.id === selectedSessionId) ?? null,
     [sessions, selectedSessionId],
   );
 
+  const selectedModelKey = selectedSession?.provider && selectedSession?.modelId
+    ? `${selectedSession.provider}/${selectedSession.modelId}`
+    : null;
+
   // ─── Data fetching ──────────────────────────────────────────────────────
 
   const loadData = useCallback(async () => {
     try {
-      setError(null);
       const [sessionsData, projectsData, modelsData] = await Promise.all([
         fetchSessions(),
         fetchProjects(),
         fetchModels(),
       ]);
+
+      setServerOnline(true);
+      setError(null);
+      setHasLoadedOnce(true);
+      setLastSyncAt(Date.now());
+
       setSessions((prev) => {
         // Retain active placeholder sessions whose files haven't been written to disk yet
         const newIds = new Set(sessionsData.map((s) => s.id));
@@ -64,11 +78,14 @@ export default function App() {
       setModels(modelsData.models);
       setDefaultModel(modelsData.defaultModel);
     } catch (err: any) {
-      setError(err.message);
+      setServerOnline(false);
+      if (!hasLoadedOnce) {
+        setError(err.message);
+      }
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [hasLoadedOnce]);
 
   useEffect(() => {
     loadData();
@@ -84,6 +101,25 @@ export default function App() {
       setSelectedSessionId(running?.id ?? sessions[0].id);
     }
   }, [loading, sessions, selectedSessionId]);
+
+  // ─── Model capabilities ────────────────────────────────────────────────
+
+  useEffect(() => {
+    if (!selectedSession?.provider || !selectedSession?.modelId || !selectedModelKey) return;
+    if (modelThinkingLevels[selectedModelKey]) return;
+
+    let cancelled = false;
+    fetchModelCapabilities(selectedSession.provider, selectedSession.modelId)
+      .then((data) => {
+        if (cancelled) return;
+        setModelThinkingLevels((prev) => ({ ...prev, [selectedModelKey]: data.thinkingLevels }));
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedSession?.provider, selectedSession?.modelId, selectedModelKey, modelThinkingLevels]);
 
   // ─── Session content loading ────────────────────────────────────────────
 
@@ -196,6 +232,7 @@ export default function App() {
   const currentThinkingLevel = selectedSession?.isActive
     ? bridge.thinkingLevel
     : selectedSession?.thinkingLevel;
+  const currentThinkingLevels = selectedModelKey ? modelThinkingLevels[selectedModelKey] : undefined;
 
   // ─── Handlers ───────────────────────────────────────────────────────────
 
@@ -212,10 +249,15 @@ export default function App() {
   }, []);
 
   const handleDispatch = useCallback(
-    async (projectPath: string, message: string, model: ModelInfo) => {
+    async (
+      projectPath: string,
+      message: string,
+      model: ModelInfo,
+      thinkingLevel?: ThinkingLevel,
+    ) => {
       try {
         setShowDispatch(false);
-        const res = await dispatch(projectPath, message, model.provider, model.modelId);
+        const res = await dispatch(projectPath, message, model.provider, model.modelId, thinkingLevel);
 
         // Create a placeholder session immediately — pi doesn't flush the
         // session file to disk until the first assistant message arrives, so
@@ -225,7 +267,7 @@ export default function App() {
         const project = projects.find((p) => p.path === projectPath);
         const placeholder: Session = {
           id: sessionId,
-          path: res.sessionFile || "",
+          path: res.sessionFile || `active://${res.bridgeId}`,
           cwd: projectPath,
           projectName: project?.name || projectPath.split("/").pop() || "unknown",
           firstMessage: message.slice(0, 200),
@@ -233,6 +275,7 @@ export default function App() {
           model: modelDisplayName(model.modelId),
           modelId: model.modelId,
           provider: model.provider,
+          thinkingLevel,
           timeAgo: "now",
           messageCount: 1,
           isActive: true,
@@ -255,9 +298,21 @@ export default function App() {
   );
 
   const handleSendMessage = useCallback(
-    (message: string) => {
+    async (message: string, mode: "steer" | "followUp") => {
       if (!selectedSession?.isActive) return;
-      bridge.sendCommand("prompt", { message });
+
+      if (bridge.isStreaming) {
+        bridge.addSystemNote(`queued as ${mode === "followUp" ? "follow-up" : "steer"}`);
+      }
+
+      try {
+        await bridge.sendCommand("prompt", {
+          message,
+          streamingBehavior: mode,
+        });
+      } catch (err) {
+        console.error("Send message failed:", err);
+      }
     },
     [selectedSession?.isActive, bridge],
   );
@@ -289,7 +344,7 @@ export default function App() {
   }, [selectedSession, loadData]);
 
   const handleThinkingLevelChange = useCallback(
-    (level: "low" | "medium" | "high") => {
+    (level: ThinkingLevel) => {
       if (selectedSession?.isActive) {
         bridge.sendCommand("set_thinking_level", { level });
       }
@@ -314,7 +369,7 @@ export default function App() {
     );
   }
 
-  if (error) {
+  if (error && !hasLoadedOnce) {
     return (
       <div className="h-full flex items-center justify-center px-8">
         <div className="text-center max-w-sm">
@@ -359,6 +414,10 @@ export default function App() {
             selectedId={selectedSessionId}
             onSelect={handleSelectSession}
             onNewDispatch={handleNewDispatch}
+            serverOnline={serverOnline}
+            lastSyncAt={lastSyncAt}
+            sidebarCollapsed={sidebarCollapsed}
+            onToggleSidebar={() => setSidebarCollapsed(!sidebarCollapsed)}
           />
         </div>
 
@@ -373,6 +432,7 @@ export default function App() {
                   onStop={handleStop}
                   onResume={handleResume}
                   onThinkingLevelChange={handleThinkingLevelChange}
+                  thinkingLevels={currentThinkingLevels}
                   sidebarCollapsed={sidebarCollapsed}
                   onToggleSidebar={() => setSidebarCollapsed(!sidebarCollapsed)}
                   showFilesPanel={showFilesPanel}
@@ -407,6 +467,10 @@ export default function App() {
             selectedId={null}
             onSelect={handleSelectSession}
             onNewDispatch={handleNewDispatch}
+            serverOnline={serverOnline}
+            lastSyncAt={lastSyncAt}
+            sidebarCollapsed={false}
+            onToggleSidebar={() => {}}
           />
         ) : sessionWithData ? (
           <SessionLog
@@ -416,6 +480,7 @@ export default function App() {
             onStop={handleStop}
             onResume={handleResume}
             onThinkingLevelChange={handleThinkingLevelChange}
+            thinkingLevels={currentThinkingLevels}
             sidebarCollapsed={false}
             onToggleSidebar={() => {}}
             showFilesPanel={false}
@@ -427,6 +492,10 @@ export default function App() {
             selectedId={null}
             onSelect={handleSelectSession}
             onNewDispatch={handleNewDispatch}
+            serverOnline={serverOnline}
+            lastSyncAt={lastSyncAt}
+            sidebarCollapsed={false}
+            onToggleSidebar={() => {}}
           />
         )}
       </div>

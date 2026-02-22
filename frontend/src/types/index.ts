@@ -20,6 +20,7 @@ export interface TouchedFile {
 /** A single entry in the session log */
 export type LogEntry =
   | { type: "directive"; text: string; timestamp: string }
+  | { type: "system"; text: string; timestamp: string }
   | { type: "tool"; call: ToolCall }
   | { type: "prose"; text: string; thinking?: string; streaming?: boolean }
   | { type: "error"; text: string; timestamp: string };
@@ -28,6 +29,8 @@ export type LogEntry =
 export type SessionStatus = "running" | "done" | "error";
 
 /** A session on the board */
+export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+
 export interface Session {
   id: string;
   path: string;
@@ -39,7 +42,7 @@ export interface Session {
   model: string;
   modelId: string;
   provider: string;
-  thinkingLevel?: "low" | "medium" | "high";
+  thinkingLevel?: ThinkingLevel;
   timeAgo: string;
   messageCount: number;
   isActive: boolean;

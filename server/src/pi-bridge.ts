@@ -36,6 +36,8 @@ export interface PiProcess {
 	cwd: string;
 	/** Session file path (if resuming) */
 	sessionFile?: string;
+	/** Session UUID (when known) */
+	sessionId?: string;
 	/** Event emitter for JSON events from pi's stdout */
 	events: EventEmitter;
 	/** Collected stderr for debugging */
@@ -103,11 +105,20 @@ export async function spawnPi(options: PiBridgeOptions): Promise<PiProcess> {
 		process: child,
 		cwd: options.cwd,
 		sessionFile: options.sessionFile,
+		sessionId: undefined,
 		events: new EventEmitter(),
 		stderr: "",
 		alive: true,
 		pendingRequests: new Map(),
 		nextRequestId: 0,
+	};
+
+	const rejectAllPending = (reason: string) => {
+		for (const [, pending] of bridge.pendingRequests) {
+			clearTimeout(pending.timer);
+			pending.reject(new Error(reason));
+		}
+		bridge.pendingRequests.clear();
 	};
 
 	// Collect stderr
@@ -141,18 +152,24 @@ export async function spawnPi(options: PiBridgeOptions): Promise<PiProcess> {
 		}
 	});
 
+	child.stdin?.on("error", (err) => {
+		bridge.stderr += `\n[stdin error] ${err.message}`;
+		rejectAllPending(`Failed to write to pi stdin: ${err.message}`);
+	});
+
+	child.on("error", (err) => {
+		bridge.alive = false;
+		bridge.stderr += `\n[process error] ${err.message}`;
+		rejectAllPending(`Pi process error: ${err.message}`);
+		bridge.events.emit("exit", { code: null, signal: null, error: err.message });
+		activeBridges.delete(bridge.id);
+	});
+
 	// Handle process exit
 	child.on("exit", (code, signal) => {
 		bridge.alive = false;
 		bridge.events.emit("exit", { code, signal });
-
-		// Reject all pending requests
-		for (const [id, pending] of bridge.pendingRequests) {
-			clearTimeout(pending.timer);
-			pending.reject(new Error(`Pi process exited (code=${code}, signal=${signal})`));
-		}
-		bridge.pendingRequests.clear();
-
+		rejectAllPending(`Pi process exited (code=${code}, signal=${signal})`);
 		activeBridges.delete(bridge.id);
 	});
 
@@ -174,6 +191,9 @@ export function sendCommand(bridge: PiProcess, command: Record<string, any>, tim
 	if (!bridge.alive) {
 		return Promise.reject(new Error("Pi process is not alive"));
 	}
+	if (!bridge.process.stdin || bridge.process.stdin.destroyed || !bridge.process.stdin.writable) {
+		return Promise.reject(new Error("Pi stdin is not writable"));
+	}
 
 	const id = `req_${++bridge.nextRequestId}`;
 	const fullCommand = { ...command, id };
@@ -185,7 +205,14 @@ export function sendCommand(bridge: PiProcess, command: Record<string, any>, tim
 		}, timeoutMs);
 
 		bridge.pendingRequests.set(id, { resolve, reject, timer });
-		bridge.process.stdin!.write(JSON.stringify(fullCommand) + "\n");
+
+		try {
+			bridge.process.stdin!.write(JSON.stringify(fullCommand) + "\n");
+		} catch (err: any) {
+			clearTimeout(timer);
+			bridge.pendingRequests.delete(id);
+			reject(new Error(`Failed to send command ${command.type}: ${err?.message || String(err)}`));
+		}
 	});
 }
 
@@ -194,7 +221,12 @@ export function sendCommand(bridge: PiProcess, command: Record<string, any>, tim
  */
 export function sendRaw(bridge: PiProcess, data: Record<string, any>): void {
 	if (!bridge.alive) return;
-	bridge.process.stdin!.write(JSON.stringify(data) + "\n");
+	if (!bridge.process.stdin || bridge.process.stdin.destroyed || !bridge.process.stdin.writable) return;
+	try {
+		bridge.process.stdin.write(JSON.stringify(data) + "\n");
+	} catch (err: any) {
+		bridge.stderr += `\n[sendRaw error] ${err?.message || String(err)}`;
+	}
 }
 
 /**

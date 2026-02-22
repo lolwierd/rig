@@ -33,11 +33,79 @@ interface ActiveSession {
 	wsClients: Set<WebSocket>;
 	/** Buffer events until first WebSocket client connects */
 	eventBuffer: any[];
+	startedAt: number;
+	initialMessage?: string;
+	thinkingLevel?: ThinkingLevel;
+	lastKnownState?: {
+		sessionId?: string;
+		sessionFile?: string;
+		provider?: string;
+		modelId?: string;
+		thinkingLevel?: ThinkingLevel;
+	};
 }
 
 const activeSessions = new Map<string, ActiveSession>();
 
+const THINKING_LEVEL_ORDER = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
+type ThinkingLevel = (typeof THINKING_LEVEL_ORDER)[number];
+
 // ─── Helpers ────────────────────────────────────────────────────────────────
+
+function projectNameFromCwd(cwd: string): string {
+	const parts = cwd.split("/").filter(Boolean);
+	return parts[parts.length - 1] || "unknown";
+}
+
+function extractText(content: any): string {
+	if (typeof content === "string") return content;
+	if (Array.isArray(content)) {
+		return content
+			.filter((b) => b?.type === "text")
+			.map((b) => b.text || "")
+			.join("");
+	}
+	return "";
+}
+
+async function resolveThinkingLevelsForModel(provider: string, modelId: string): Promise<ThinkingLevel[]> {
+	let bridge: PiProcess | null = null;
+	const seen = new Set<ThinkingLevel>();
+	try {
+		bridge = await spawnPi({ cwd: process.cwd() });
+
+		const setResp = await sendCommand(bridge, { type: "set_model", provider, modelId }, 10000);
+		if (!setResp?.success) {
+			throw new Error(setResp?.error || `Model not found: ${provider}/${modelId}`);
+		}
+
+		const stateResp = await sendCommand(bridge, { type: "get_state" }, 10000);
+		if (!stateResp?.success) throw new Error(stateResp?.error || "Failed to fetch state");
+
+		const model = stateResp.data?.model;
+		const reasoning = !!model?.reasoning;
+		const startLevel = (stateResp.data?.thinkingLevel || "off") as ThinkingLevel;
+
+		if (!reasoning) {
+			return ["off"];
+		}
+
+		seen.add(startLevel);
+		for (let i = 0; i < THINKING_LEVEL_ORDER.length + 2; i++) {
+			const cycleResp = await sendCommand(bridge, { type: "cycle_thinking_level" }, 10000);
+			if (!cycleResp?.success || !cycleResp?.data?.level) break;
+			const level = cycleResp.data.level as ThinkingLevel;
+			if (seen.has(level)) break;
+			seen.add(level);
+		}
+
+		await sendCommand(bridge, { type: "set_thinking_level", level: startLevel }, 5000).catch(() => {});
+		const levels = THINKING_LEVEL_ORDER.filter((l) => seen.has(l));
+		return levels.length > 0 ? levels : ["off", "minimal", "low", "medium", "high"];
+	} finally {
+		if (bridge) killBridge(bridge);
+	}
+}
 
 /**
  * Wire a bridge's events to WebSocket clients and file tracker.
@@ -49,11 +117,33 @@ function registerSession(bridge: PiProcess): ActiveSession {
 	const wsClients = new Set<WebSocket>();
 	const eventBuffer: any[] = [];
 
-	const session: ActiveSession = { bridge, fileTracker, wsClients, eventBuffer };
+	const session: ActiveSession = {
+		bridge,
+		fileTracker,
+		wsClients,
+		eventBuffer,
+		startedAt: Date.now(),
+	};
 	activeSessions.set(bridge.id, session);
 
 	bridge.events.on("event", (event: any) => {
 		fileTracker.processEvent(event);
+
+		if (event?.type === "thinking_level_change" && event.thinkingLevel) {
+			session.thinkingLevel = event.thinkingLevel;
+		}
+		if (event?.type === "model_change") {
+			session.lastKnownState = {
+				...session.lastKnownState,
+				provider: event.provider,
+				modelId: event.modelId,
+			};
+		}
+		if (event?.type === "message_start" && event.message?.role === "user" && !session.initialMessage) {
+			const text = extractText(event.message.content).trim();
+			if (text) session.initialMessage = text.slice(0, 200);
+		}
+
 		if (wsClients.size === 0) {
 			eventBuffer.push(event);
 		} else {
@@ -225,31 +315,96 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
 		}
 	});
 
+	const modelThinkingCache = new Map<string, { levels: ThinkingLevel[]; at: number }>();
+
+	app.get(
+		"/api/models/capabilities",
+		async (
+			req: FastifyRequest<{ Querystring: { provider?: string; modelId?: string } }>,
+			reply: FastifyReply,
+		) => {
+			const { provider, modelId } = req.query;
+			if (!provider || !modelId) {
+				return reply.code(400).send({ error: "provider and modelId are required" });
+			}
+
+			const key = `${provider}/${modelId}`;
+			const cached = modelThinkingCache.get(key);
+			if (cached && Date.now() - cached.at < 5 * 60_000) {
+				return { provider, modelId, thinkingLevels: cached.levels };
+			}
+
+			try {
+				const levels = await resolveThinkingLevelsForModel(provider, modelId);
+				modelThinkingCache.set(key, { levels, at: Date.now() });
+				return { provider, modelId, thinkingLevels: levels };
+			} catch (err: any) {
+				return reply.code(500).send({ error: err?.message || "Failed to resolve model capabilities" });
+			}
+		},
+	);
+
 	// ═══════════════════════════════════════════════════════════════════════
 	// Sessions (read from pi's session files)
 	// ═══════════════════════════════════════════════════════════════════════
 
 	app.get("/api/sessions", async (req: FastifyRequest<{ Querystring: { cwd?: string } }>) => {
 		const { cwd } = req.query;
-		const sessions = cwd
+		const fileSessions = cwd
 			? await listSessionsForCwd(cwd)
 			: await listAllSessions();
 
-		// Build a map of sessionFile → bridgeId for active sessions
-		const activeMap = new Map<string, string>();
+		// Build lookup maps for active sessions by both path and session ID.
+		const activeByPath = new Map<string, string>();
+		const activeById = new Map<string, string>();
 		for (const [, active] of activeSessions) {
-			if (active.bridge.sessionFile) {
-				activeMap.set(active.bridge.sessionFile, active.bridge.id);
-			}
+			if (active.bridge.sessionFile) activeByPath.set(active.bridge.sessionFile, active.bridge.id);
+			if (active.bridge.sessionId) activeById.set(active.bridge.sessionId, active.bridge.id);
+			if (active.lastKnownState?.sessionFile) activeByPath.set(active.lastKnownState.sessionFile, active.bridge.id);
+			if (active.lastKnownState?.sessionId) activeById.set(active.lastKnownState.sessionId, active.bridge.id);
 		}
 
-		return {
-			sessions: sessions.map((s) => ({
+		const merged = fileSessions.map((s) => {
+			const bridgeId = activeByPath.get(s.path) || activeById.get(s.id);
+			return {
 				...s,
-				isActive: activeMap.has(s.path),
-				bridgeId: activeMap.get(s.path),
-			})),
-		};
+				isActive: !!bridgeId,
+				bridgeId,
+			};
+		});
+
+		// If a bridge is active but its session file isn't on disk yet, synthesize
+		// a temporary row so users can reconnect after closing/reopening tabs.
+		const knownIds = new Set(merged.map((s) => s.id));
+		for (const [bridgeId, active] of activeSessions) {
+			if (!active.bridge.alive) continue;
+			if (cwd && active.bridge.cwd !== cwd) continue;
+
+			const syntheticId =
+				active.bridge.sessionId || active.lastKnownState?.sessionId || bridgeId;
+			if (knownIds.has(syntheticId)) continue;
+
+			merged.push({
+				id: syntheticId,
+				path: active.bridge.sessionFile || active.lastKnownState?.sessionFile || `active://${bridgeId}`,
+				cwd: active.bridge.cwd,
+				projectName: projectNameFromCwd(active.bridge.cwd),
+				name: undefined,
+				firstMessage: active.initialMessage || "(starting...)",
+				created: new Date(active.startedAt),
+				modified: new Date(),
+				messageCount: active.initialMessage ? 1 : 0,
+				lastModel: active.lastKnownState?.modelId,
+				lastProvider: active.lastKnownState?.provider,
+				thinkingLevel: active.thinkingLevel || active.lastKnownState?.thinkingLevel,
+				isActive: true,
+				bridgeId,
+			});
+			knownIds.add(syntheticId);
+		}
+
+		merged.sort((a: any, b: any) => new Date(b.modified).getTime() - new Date(a.modified).getTime());
+		return { sessions: merged };
 	});
 
 	app.get("/api/sessions/:id/entries", async (req: FastifyRequest<{ Params: { id: string }; Querystring: { path: string } }>, reply: FastifyReply) => {
@@ -270,6 +425,7 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
 		for (const [id, session] of activeSessions) {
 			active.push({
 				bridgeId: id,
+				sessionId: session.bridge.sessionId,
 				cwd: session.bridge.cwd,
 				sessionFile: session.bridge.sessionFile,
 				alive: session.bridge.alive,
@@ -293,18 +449,24 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
 					message: string;
 					provider?: string;
 					model?: string;
+					thinkingLevel?: ThinkingLevel;
 				};
 			}>,
 			reply: FastifyReply,
 		) => {
-			const { cwd, message, provider, model } = req.body;
+			const { cwd, message, provider, model, thinkingLevel } = req.body;
 			if (!cwd) {
 				return reply.code(400).send({ error: "cwd is required" });
+			}
+			if (thinkingLevel && !(THINKING_LEVEL_ORDER as readonly string[]).includes(thinkingLevel)) {
+				return reply.code(400).send({ error: "thinkingLevel must be one of off, minimal, low, medium, high, xhigh" });
 			}
 
 			try {
 				const bridge = await spawnPi({ cwd, provider, model });
-				registerSession(bridge);
+				const active = registerSession(bridge);
+				active.initialMessage = message?.trim() ? message.trim().slice(0, 200) : undefined;
+				active.thinkingLevel = thinkingLevel;
 
 				// Get session state (includes session file path)
 				const stateResp = await sendCommand(bridge, { type: "get_state" });
@@ -313,16 +475,32 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
 				if (sessionState?.sessionFile) {
 					bridge.sessionFile = sessionState.sessionFile;
 				}
+				if (sessionState?.sessionId) {
+					bridge.sessionId = sessionState.sessionId;
+				}
+				active.lastKnownState = {
+					sessionId: sessionState?.sessionId,
+					sessionFile: sessionState?.sessionFile,
+					provider: sessionState?.provider || sessionState?.model?.provider,
+					modelId: sessionState?.modelId || sessionState?.model?.id,
+					thinkingLevel: sessionState?.thinkingLevel,
+				};
 
-				// Send the initial prompt — events are buffered until WS connects
+				if (thinkingLevel) {
+					await sendCommand(bridge, { type: "set_thinking_level", level: thinkingLevel });
+				}
+
+				// Send the initial prompt fire-and-forget — events are buffered until WS connects.
+				// We intentionally don't await a prompt response here to avoid blocking dispatch
+				// when the model starts streaming immediately.
 				if (message) {
-					await sendCommand(bridge, { type: "prompt", message });
+					sendRaw(bridge, { type: "prompt", message });
 				}
 
 				return {
 					bridgeId: bridge.id,
-					sessionId: sessionState?.sessionId,
-					sessionFile: sessionState?.sessionFile,
+					sessionId: bridge.sessionId || sessionState?.sessionId || bridge.id,
+					sessionFile: bridge.sessionFile || sessionState?.sessionFile,
 				};
 			} catch (err: any) {
 				return reply.code(500).send({ error: err.message });
@@ -356,7 +534,19 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
 
 			try {
 				const bridge = await spawnPi({ cwd, sessionFile });
-				registerSession(bridge);
+				const active = registerSession(bridge);
+				const stateResp = await sendCommand(bridge, { type: "get_state" });
+				const sessionState = stateResp.success ? stateResp.data : null;
+				if (sessionState?.sessionFile) bridge.sessionFile = sessionState.sessionFile;
+				if (sessionState?.sessionId) bridge.sessionId = sessionState.sessionId;
+				active.lastKnownState = {
+					sessionId: sessionState?.sessionId,
+					sessionFile: sessionState?.sessionFile,
+					provider: sessionState?.provider || sessionState?.model?.provider,
+					modelId: sessionState?.modelId || sessionState?.model?.id,
+					thinkingLevel: sessionState?.thinkingLevel,
+				};
+				active.thinkingLevel = sessionState?.thinkingLevel;
 				return { bridgeId: bridge.id };
 			} catch (err: any) {
 				return reply.code(500).send({ error: err.message });
@@ -400,8 +590,20 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
 			// Send current state on connect
 			sendCommand(session.bridge, { type: "get_state" })
 				.then((state) => {
+					const data = state?.data;
+					if (data?.sessionFile) session.bridge.sessionFile = data.sessionFile;
+					if (data?.sessionId) session.bridge.sessionId = data.sessionId;
+					session.lastKnownState = {
+						...session.lastKnownState,
+						sessionId: data?.sessionId,
+						sessionFile: data?.sessionFile,
+						provider: data?.provider || data?.model?.provider,
+						modelId: data?.modelId || data?.model?.id,
+						thinkingLevel: data?.thinkingLevel,
+					};
+					if (data?.thinkingLevel) session.thinkingLevel = data.thinkingLevel;
 					if (socket.readyState === 1) {
-						socket.send(JSON.stringify({ type: "state", data: state.data }));
+						socket.send(JSON.stringify({ type: "state", data }));
 					}
 				})
 				.catch(() => {});
@@ -425,10 +627,31 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
 
 			// Handle incoming commands from the client
 			socket.on("message", async (raw: Buffer | string) => {
+				const sendWsError = (requestId: string | undefined, message: string) => {
+					if (socket.readyState !== 1) return;
+					socket.send(
+						JSON.stringify({
+							type: "response",
+							requestId,
+							error: message,
+						}),
+					);
+				};
+
 				try {
 					const msg = JSON.parse(raw.toString());
 
+					if (!msg || typeof msg !== "object" || typeof msg.type !== "string") {
+						sendWsError(undefined, "Malformed WS message");
+						return;
+					}
+
 					if (msg.type === "command") {
+						if (!msg.command || typeof msg.command !== "object" || typeof msg.command.type !== "string") {
+							sendWsError(msg.requestId, "Invalid command payload");
+							return;
+						}
+
 						// Forward command to pi and send response back
 						try {
 							const response = await sendCommand(session.bridge, msg.command);
@@ -442,22 +665,26 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
 								);
 							}
 						} catch (err: any) {
-							if (socket.readyState === 1) {
-								socket.send(
-									JSON.stringify({
-										type: "response",
-										requestId: msg.requestId,
-										error: err.message,
-									}),
-								);
-							}
+							sendWsError(msg.requestId, err.message || "Command failed");
 						}
 					} else if (msg.type === "extension_ui_response") {
-						// Forward extension UI responses directly
-						sendRaw(session.bridge, msg.data);
+						// Forward extension UI responses directly (must include type for pi RPC mode)
+						const payload =
+							msg.data && typeof msg.data === "object"
+								? msg.data.type === "extension_ui_response"
+									? msg.data
+									: { type: "extension_ui_response", ...msg.data }
+								: null;
+						if (!payload || typeof (payload as any).id !== "string") {
+							sendWsError(undefined, "Invalid extension_ui_response payload");
+							return;
+						}
+						sendRaw(session.bridge, payload);
+					} else {
+						sendWsError(msg.requestId, `Unknown WS message type: ${msg.type}`);
 					}
 				} catch {
-					// Ignore malformed messages
+					sendWsError(undefined, "Failed to parse WS message");
 				}
 			});
 

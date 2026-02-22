@@ -1,15 +1,23 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { wsUrl } from "../lib/api";
-import type { LogEntry, Session, ToolCall, TouchedFile, ExtensionUIRequest } from "../types";
+import type { LogEntry, Session, ToolCall, TouchedFile, ExtensionUIRequest, ThinkingLevel } from "../types";
+
+interface PendingCommand {
+  resolve: (data: any) => void;
+  reject: (error: Error) => void;
+  timer: ReturnType<typeof setTimeout>;
+}
 
 export interface UseSessionBridgeResult {
   entries: LogEntry[];
   touchedFiles: TouchedFile[];
-  thinkingLevel?: "low" | "medium" | "high";
+  thinkingLevel?: ThinkingLevel;
   pendingRequest: ExtensionUIRequest | null;
   isReady: boolean;
-  sendCommand: (type: string, payload?: any) => void;
+  isStreaming: boolean;
+  sendCommand: (type: string, payload?: any) => Promise<any>;
   sendResponse: (id: string, payload: any) => void;
+  addSystemNote: (text: string) => void;
 }
 
 export function useSessionBridge(
@@ -18,12 +26,38 @@ export function useSessionBridge(
 ): UseSessionBridgeResult {
   const [entries, setEntries] = useState<LogEntry[]>(initialEntries);
   const [touchedFiles, setTouchedFiles] = useState<TouchedFile[]>([]);
-  const [thinkingLevel, setThinkingLevel] = useState<"low" | "medium" | "high" | undefined>(
+  const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevel | undefined>(
     session?.thinkingLevel,
   );
   const [pendingRequest, setPendingRequest] = useState<ExtensionUIRequest | null>(null);
   const [isReady, setIsReady] = useState(false);
+  const [isStreaming, setIsStreaming] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
+
+  const pendingRequestsRef = useRef(new Map<string, PendingCommand>());
+  const requestCounterRef = useRef(0);
+
+  const appendError = useCallback((text: string) => {
+    setEntries((prev) => [
+      ...prev,
+      { type: "error", text, timestamp: new Date().toLocaleTimeString() },
+    ]);
+  }, []);
+
+  const addSystemNote = useCallback((text: string) => {
+    setEntries((prev) => [
+      ...prev,
+      { type: "system", text, timestamp: new Date().toLocaleTimeString() },
+    ]);
+  }, []);
+
+  const rejectPendingRequests = useCallback((reason: string) => {
+    for (const [, pending] of pendingRequestsRef.current) {
+      clearTimeout(pending.timer);
+      pending.reject(new Error(reason));
+    }
+    pendingRequestsRef.current.clear();
+  }, []);
 
   // Track previous session ID to detect actual session changes (not just re-renders)
   const prevSessionIdRef = useRef<string | null>(null);
@@ -37,8 +71,10 @@ export function useSessionBridge(
       setTouchedFiles([]);
       setThinkingLevel(session?.thinkingLevel);
       setPendingRequest(null);
+      setIsStreaming(false);
+      rejectPendingRequests("Session changed");
     }
-  }, [session?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [session?.id, session?.thinkingLevel, rejectPendingRequests]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Sync initial entries when they arrive (async fetch completes after session selection)
   const initialEntriesLenRef = useRef(0);
@@ -51,6 +87,17 @@ export function useSessionBridge(
 
   // Event handler — processes RPC events from pi and updates log entries
   const handleEvent = useCallback((event: any) => {
+    if (event.type === "response" && event.success === false && event.error) {
+      appendError(event.error);
+      return;
+    }
+
+    if (event.type === "agent_start") {
+      setIsStreaming(true);
+    } else if (event.type === "agent_end") {
+      setIsStreaming(false);
+    }
+
     if (event.type === "thinking_level_change") {
       setThinkingLevel(event.thinkingLevel);
     }
@@ -63,10 +110,7 @@ export function useSessionBridge(
       }
       // Non-interactive (notifications/errors from extensions) — show as log entry
       if (event.message) {
-        setEntries((prev) => [
-          ...prev,
-          { type: "error", text: event.message, timestamp: new Date().toLocaleTimeString() },
-        ]);
+        appendError(event.message);
       }
       return;
     }
@@ -79,8 +123,7 @@ export function useSessionBridge(
         const { message } = event;
         if (message.role === "user") {
           const text = extractText(message.content);
-          const isDupe =
-            last?.type === "directive" && last.text === text;
+          const isDupe = last?.type === "directive" && last.text === text;
           if (!isDupe) {
             next.push({
               type: "directive",
@@ -162,7 +205,7 @@ export function useSessionBridge(
         });
       }
     }
-  }, []);
+  }, [appendError]);
 
   const connect = useCallback(() => {
     if (!session?.bridgeId || !session.isActive) return;
@@ -175,37 +218,91 @@ export function useSessionBridge(
 
     ws.onclose = () => {
       setIsReady(false);
+      setIsStreaming(false);
       wsRef.current = null;
+      rejectPendingRequests("Connection closed");
     };
 
-    ws.onerror = () => setIsReady(false);
+    ws.onerror = () => {
+      setIsReady(false);
+      setIsStreaming(false);
+      rejectPendingRequests("WebSocket error");
+    };
 
     ws.onmessage = (msg) => {
       try {
         const data = JSON.parse(msg.data);
         if (data.type === "state") {
           if (data.data?.thinkingLevel) setThinkingLevel(data.data.thinkingLevel);
+          setIsStreaming(!!data.data?.isStreaming);
         } else if (data.type === "files") {
           setTouchedFiles(data.files);
         } else if (data.type === "event") {
           handleEvent(data.event);
+        } else if (data.type === "response") {
+          const requestId = data.requestId as string | undefined;
+          if (!requestId) return;
+
+          const pending = pendingRequestsRef.current.get(requestId);
+          if (!pending) return;
+
+          pendingRequestsRef.current.delete(requestId);
+          clearTimeout(pending.timer);
+
+          const commandError =
+            data.error ||
+            (data.data && data.data.success === false ? data.data.error || "Command failed" : null);
+
+          if (commandError) {
+            appendError(commandError);
+            pending.reject(new Error(commandError));
+          } else {
+            pending.resolve(data.data);
+          }
         }
       } catch {
         // Ignore malformed messages
       }
     };
-  }, [session?.bridgeId, session?.isActive, handleEvent]);
+  }, [session?.bridgeId, session?.isActive, handleEvent, rejectPendingRequests, appendError]);
 
   const sendCommand = useCallback((type: string, payload: any = {}) => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: "command", command: { type, ...payload } }));
+    if (wsRef.current?.readyState !== WebSocket.OPEN) {
+      return Promise.reject(new Error("Session socket is not connected"));
     }
-  }, []);
+
+    const requestId = `cmd_${++requestCounterRef.current}`;
+
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        pendingRequestsRef.current.delete(requestId);
+        const err = new Error(`Timeout waiting for ${type} response`);
+        appendError(err.message);
+        reject(err);
+      }, 30000);
+
+      pendingRequestsRef.current.set(requestId, { resolve, reject, timer });
+
+      try {
+        wsRef.current!.send(
+          JSON.stringify({ type: "command", requestId, command: { type, ...payload } }),
+        );
+      } catch (err: any) {
+        clearTimeout(timer);
+        pendingRequestsRef.current.delete(requestId);
+        const error = new Error(err?.message || "Failed to send command");
+        appendError(error.message);
+        reject(error);
+      }
+    });
+  }, [appendError]);
 
   const sendResponse = useCallback((id: string, payload: any) => {
     setPendingRequest((prev) => (prev?.id === id ? null : prev));
     if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: "extension_ui_response", data: { id, ...payload } }));
+      wsRef.current.send(
+        JSON.stringify({ type: "extension_ui_response", data: { id, ...payload } }),
+      );
     }
   }, []);
 
@@ -215,16 +312,29 @@ export function useSessionBridge(
       connect();
     } else {
       setIsReady(false);
+      setIsStreaming(false);
       wsRef.current?.close();
       wsRef.current = null;
+      rejectPendingRequests("Session is not active");
     }
     return () => {
       wsRef.current?.close();
       wsRef.current = null;
+      rejectPendingRequests("Session connection reset");
     };
-  }, [session?.id, session?.bridgeId, session?.isActive, connect]);
+  }, [session?.id, session?.bridgeId, session?.isActive, connect, rejectPendingRequests]);
 
-  return { entries, touchedFiles, thinkingLevel, pendingRequest, isReady, sendCommand, sendResponse };
+  return {
+    entries,
+    touchedFiles,
+    thinkingLevel,
+    pendingRequest,
+    isReady,
+    isStreaming,
+    sendCommand,
+    sendResponse,
+    addSystemNote,
+  };
 }
 
 function extractText(content: any): string {

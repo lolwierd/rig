@@ -1,5 +1,5 @@
 import { Search, Plus } from "lucide-react";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import type { Session } from "../types";
 import { ProjectBadge } from "./ProjectBadge";
 import { StatusDot } from "./StatusDot";
@@ -9,6 +9,10 @@ interface BoardProps {
   selectedId: string | null;
   onSelect: (session: Session) => void;
   onNewDispatch: () => void;
+  serverOnline: boolean;
+  lastSyncAt: number | null;
+  sidebarCollapsed: boolean;
+  onToggleSidebar: () => void;
 }
 
 export function Board({
@@ -16,8 +20,28 @@ export function Board({
   selectedId,
   onSelect,
   onNewDispatch,
+  serverOnline,
+  lastSyncAt,
+  sidebarCollapsed,
+  onToggleSidebar,
 }: BoardProps) {
   const [filter, setFilter] = useState("");
+  const [now, setNow] = useState(Date.now());
+
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  const syncText = useMemo(() => {
+    if (!lastSyncAt) return "sync pending";
+    const diffSec = Math.max(0, Math.floor((now - lastSyncAt) / 1000));
+    if (diffSec < 60) return `${diffSec}s ago`;
+    const min = Math.floor(diffSec / 60);
+    if (min < 60) return `${min}m ago`;
+    const hr = Math.floor(min / 60);
+    return `${hr}h ago`;
+  }, [lastSyncAt, now]);
 
   const filtered = useMemo(() => {
     if (!filter) return sessions;
@@ -42,9 +66,7 @@ export function Board({
     <div className="flex flex-col h-full">
       {/* Top bar */}
       <div className="flex items-center gap-3 px-4 py-3 border-b border-border bg-surface">
-        <span className="font-ui text-lg font-bold tracking-tight text-amber">
-          rig
-        </span>
+        <span className="font-ui text-lg font-bold tracking-tight text-amber shrink-0">rig</span>
         <div className="flex-1 flex items-center gap-2 h-8 bg-surface-2 border border-border rounded-lg px-3">
           <Search size={13} className="text-text-muted shrink-0" />
           <input
@@ -101,7 +123,6 @@ export function Board({
               </p>
             ) : (
               <>
-                {/* Empty board — quiet, inviting */}
                 <div className="w-10 h-px bg-border mb-5" />
                 <p className="font-mono text-[11px] text-text-dim mb-1">
                   no dispatches yet
@@ -120,6 +141,23 @@ export function Board({
             )}
           </div>
         )}
+      </div>
+
+      {/* Sidebar footer */}
+      <div className="border-t border-border bg-surface px-4 py-3 flex items-center gap-2.5 shrink-0">
+        <span
+          className={`font-mono text-[10px] leading-none ${serverOnline ? "text-text-muted" : "text-red"}`}
+          title={serverOnline ? "server reachable" : "server unreachable — sessions pause if host sleeps"}
+        >
+          {serverOnline ? `online • sync ${syncText}` : `offline • last sync ${syncText}`}
+        </span>
+        <button
+          onClick={onToggleSidebar}
+          className="ml-auto hidden lg:inline-flex h-9 items-center rounded-lg border border-border bg-surface-2 px-3 font-mono text-[10px] uppercase tracking-wide text-text-muted hover:text-text hover:border-border-bright transition-colors cursor-pointer"
+          title={sidebarCollapsed ? "Show board" : "Collapse board"}
+        >
+          {sidebarCollapsed ? "show" : "collapse"}
+        </button>
       </div>
     </div>
   );

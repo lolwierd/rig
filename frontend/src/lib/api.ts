@@ -5,7 +5,7 @@
  * and production same-origin serving.
  */
 
-import type { Session, Project, ModelInfo } from "../types";
+import type { Session, Project, ModelInfo, ThinkingLevel } from "../types";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -140,8 +140,9 @@ export async function dispatch(
   message: string,
   provider?: string,
   model?: string,
+  thinkingLevel?: ThinkingLevel,
 ): Promise<{ bridgeId: string; sessionId: string; sessionFile: string }> {
-  return post("/api/dispatch", { cwd, message, provider, model });
+  return post("/api/dispatch", { cwd, message, provider, model, thinkingLevel });
 }
 
 /** Resume an existing session */
@@ -165,6 +166,15 @@ export async function fetchAllModels(): Promise<
     models: Array<{ provider: string; modelId: string; name: string; reasoning: boolean }>;
   }>("/api/models/all");
   return data.models;
+}
+
+/** Fetch exact thinking levels supported by a model (resolved via pi runtime) */
+export async function fetchModelCapabilities(
+  provider: string,
+  modelId: string,
+): Promise<{ provider: string; modelId: string; thinkingLevels: ThinkingLevel[] }> {
+  const params = `?provider=${encodeURIComponent(provider)}&modelId=${encodeURIComponent(modelId)}`;
+  return get(`/api/models/capabilities${params}`);
 }
 
 /** Browse server filesystem directories */

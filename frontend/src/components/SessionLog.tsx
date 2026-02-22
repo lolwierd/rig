@@ -1,16 +1,18 @@
-import { ArrowLeft, Square, Play, Brain, ChevronRight, PanelLeft, PanelLeftClose, FileText } from "lucide-react";
+import { ArrowLeft, Square, Play, Brain, ChevronRight, PanelLeft, FileText } from "lucide-react";
 import { useState, useRef, useEffect, useCallback } from "react";
-import type { Session } from "../types";
+import type { Session, ThinkingLevel } from "../types";
 import { ProjectBadge } from "./ProjectBadge";
 import { ToolCallLine } from "./ToolCallLine";
+import { MarkdownMessage } from "./MarkdownMessage";
 
 interface SessionLogProps {
   session: Session;
   onBack: () => void;
-  onSendMessage: (message: string) => void;
+  onSendMessage: (message: string, mode: "steer" | "followUp") => void;
   onStop: () => void;
   onResume: () => void;
-  onThinkingLevelChange: (level: "low" | "medium" | "high") => void;
+  onThinkingLevelChange: (level: ThinkingLevel) => void;
+  thinkingLevels?: ThinkingLevel[];
   sidebarCollapsed: boolean;
   onToggleSidebar: () => void;
   showFilesPanel: boolean;
@@ -24,12 +26,14 @@ export function SessionLog({
   onStop,
   onResume,
   onThinkingLevelChange,
+  thinkingLevels,
   sidebarCollapsed,
   onToggleSidebar,
   showFilesPanel,
   onToggleFiles,
 }: SessionLogProps) {
   const [input, setInput] = useState("");
+  const [messageMode, setMessageMode] = useState<"steer" | "followUp">("steer");
   const logEndRef = useRef<HTMLDivElement>(null);
   const logContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -63,10 +67,22 @@ export function SessionLog({
     });
   }, [session.entries]);
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+  const scrollToBottom = (behavior: ScrollBehavior = "smooth") => {
+    requestAnimationFrame(() => {
+      logEndRef.current?.scrollIntoView({ behavior });
+    });
+  };
+
+  const handleSubmit = (e?: React.SyntheticEvent, overrideMode?: "steer" | "followUp") => {
+    e?.preventDefault();
     if (!input.trim()) return;
-    onSendMessage(input.trim());
+
+    // User explicitly sent a follow-up/steer message: force auto-scroll so
+    // their message + assistant reply stays in view.
+    shouldAutoScroll.current = true;
+    scrollToBottom("smooth");
+
+    onSendMessage(input.trim(), overrideMode ?? messageMode);
     setInput("");
   };
 
@@ -76,14 +92,16 @@ export function SessionLog({
     <div className="flex flex-col h-full bg-bg">
       {/* Header */}
       <div className="flex items-center gap-2 px-3 py-2 border-b border-border bg-surface shrink-0">
-        {/* Desktop: sidebar toggle */}
-        <button
-          onClick={onToggleSidebar}
-          className="hidden lg:flex p-1.5 text-text-muted hover:text-text transition-colors cursor-pointer rounded hover:bg-surface-2"
-          title={sidebarCollapsed ? "Show board" : "Hide board"}
-        >
-          {sidebarCollapsed ? <PanelLeft size={15} /> : <PanelLeftClose size={15} />}
-        </button>
+        {/* Desktop: show board button (only when collapsed) */}
+        {sidebarCollapsed && (
+          <button
+            onClick={onToggleSidebar}
+            className="hidden lg:flex p-1.5 text-text-muted hover:text-text transition-colors cursor-pointer rounded hover:bg-surface-2"
+            title="Show board"
+          >
+            <PanelLeft size={15} />
+          </button>
+        )}
         {/* Mobile: back */}
         <button
           onClick={onBack}
@@ -107,18 +125,23 @@ export function SessionLog({
         {session.thinkingLevel && (
           <button
             onClick={() => {
-              const next =
-                session.thinkingLevel === "low"
-                  ? "medium"
-                  : session.thinkingLevel === "medium"
-                    ? "high"
-                    : "low";
+              const levels = thinkingLevels && thinkingLevels.length > 0
+                ? thinkingLevels
+                : (["off", "minimal", "low", "medium", "high"] as ThinkingLevel[]);
+              const idx = Math.max(0, levels.indexOf(session.thinkingLevel as ThinkingLevel));
+              const next = levels[(idx + 1) % levels.length];
               onThinkingLevelChange(next);
             }}
-            className="font-mono text-[10px] text-text-dim bg-surface-2 border border-border rounded-md px-2 py-1 hover:text-text hover:border-amber transition-colors cursor-pointer shrink-0"
+            className={`h-7 inline-flex items-center rounded-md border px-2 font-mono text-[10px] uppercase tracking-wide transition-colors cursor-pointer shrink-0 ${
+              session.thinkingLevel === "high" || session.thinkingLevel === "xhigh"
+                ? "border-amber/35 bg-amber/10 text-amber"
+                : session.thinkingLevel === "medium"
+                  ? "border-border-bright bg-surface-2 text-text-dim hover:text-text"
+                  : "border-border bg-surface-2 text-text-muted hover:text-text"
+            }`}
             title="Thinking level (click to cycle)"
           >
-            think:{session.thinkingLevel}
+            {session.thinkingLevel === "minimal" ? "min" : session.thinkingLevel === "medium" ? "med" : session.thinkingLevel}
           </button>
         )}
 
@@ -171,8 +194,11 @@ export function SessionLog({
                   <span className="uppercase tracking-widest text-amber/60 font-semibold text-[9px]">you</span>
                   <span>{entry.timestamp}</span>
                 </div>
-                <div className="text-[14px] text-text leading-relaxed py-3 px-4 bg-surface-2/80 rounded-lg">
-                  {entry.text}
+                <div className="py-3 px-4 bg-surface-2/80 rounded-lg">
+                  <MarkdownMessage
+                    text={entry.text}
+                    className="text-[13px] text-text leading-[1.65]"
+                  />
                 </div>
               </div>
             );
@@ -180,6 +206,16 @@ export function SessionLog({
 
           if (entry.type === "tool") {
             return <ToolCallLine key={i} call={entry.call} />;
+          }
+
+          if (entry.type === "system") {
+            return (
+              <div key={i} className="my-2 text-center">
+                <span className="inline-flex items-center gap-1 font-mono text-[10px] text-text-muted bg-surface-2 border border-border rounded-full px-2.5 py-1">
+                  {entry.text}
+                </span>
+              </div>
+            );
           }
 
           if (entry.type === "prose") {
@@ -192,8 +228,8 @@ export function SessionLog({
                   />
                 )}
                 {(entry.text || (!entry.thinking && entry.streaming)) && (
-                  <div className="text-[13px] text-text leading-[1.7]">
-                    {renderMarkdownLite(entry.text)}
+                  <div className="text-[13px] text-text leading-[1.65]">
+                    <MarkdownMessage text={entry.text} />
                     {entry.streaming && (
                       <span className="inline-block w-0.5 h-3.5 bg-amber ml-0.5 align-text-bottom animate-[blink_1s_step-end_infinite]" />
                     )}
@@ -222,12 +258,32 @@ export function SessionLog({
           onSubmit={handleSubmit}
           className="flex items-center gap-2.5 px-4 py-3 border-t border-border bg-surface shrink-0"
         >
+          <select
+            value={messageMode}
+            onChange={(e) => setMessageMode(e.target.value as "steer" | "followUp")}
+            className="h-9 bg-surface-2 border border-border rounded-lg px-2 font-mono text-[10px] text-text-dim outline-none focus:border-border-bright"
+            title="Queue mode"
+          >
+            <option value="steer">steer</option>
+            <option value="followUp">follow-up</option>
+          </select>
+
           <input
             ref={inputRef}
             type="text"
-            placeholder="follow up..."
+            placeholder="send steering/follow-up..."
             value={input}
             onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key !== "Enter") return;
+              if (e.altKey) {
+                e.preventDefault();
+                handleSubmit(e, "followUp");
+              } else if (e.metaKey || e.ctrlKey) {
+                e.preventDefault();
+                handleSubmit(e, "steer");
+              }
+            }}
             className="flex-1 h-9 bg-surface-2 border border-border rounded-lg px-3.5 text-[13px] text-text placeholder:text-text-muted outline-none focus:border-border-bright transition-colors"
           />
           <button
@@ -265,115 +321,11 @@ function ThinkingBlock({ text, streaming }: { text: string; streaming: boolean }
         )}
       </button>
       {isOpen && (
-        <div className="ml-4 pl-3 border-l-2 border-violet/20 text-[12px] text-text-dim leading-relaxed max-h-[300px] overflow-y-auto whitespace-pre-wrap">
-          {text}
+        <div className="ml-4 pl-3 border-l-2 border-violet/20 max-h-[300px] overflow-y-auto">
+          <MarkdownMessage text={text} className="text-[12px] text-text-dim leading-[1.6]" />
         </div>
       )}
     </div>
   );
 }
 
-// ─── Minimal Markdown renderer ────────────────────────────────────────────
-
-function renderMarkdownLite(text: string) {
-  const codeBlockRegex = /```(\w+)?\n([\s\S]*?)```/g;
-  const blocks: { type: string; lang?: string; content: string }[] = [];
-  let lastIndex = 0;
-  let match: RegExpExecArray | null;
-
-  while ((match = codeBlockRegex.exec(text)) !== null) {
-    if (match.index > lastIndex) {
-      blocks.push({ type: "text", content: text.slice(lastIndex, match.index) });
-    }
-    blocks.push({ type: "code", lang: match[1], content: match[2] });
-    lastIndex = match.index + match[0].length;
-  }
-  if (lastIndex < text.length) {
-    blocks.push({ type: "text", content: text.slice(lastIndex) });
-  }
-
-  return (
-    <>
-      {blocks.map((block, blockIdx) => {
-        if (block.type === "code") {
-          return (
-            <div
-              key={blockIdx}
-              className="my-3 bg-surface-2 border border-border rounded-lg overflow-hidden font-mono text-[11px] leading-relaxed"
-            >
-              {block.lang && (
-                <div className="px-3 py-1.5 bg-surface-3 border-b border-border text-[10px] text-text-muted uppercase tracking-wider font-semibold">
-                  {block.lang}
-                </div>
-              )}
-              <div className="p-3 overflow-x-auto text-text-dim m-0 whitespace-pre">{block.content}</div>
-            </div>
-          );
-        }
-
-        return (
-          <div key={blockIdx}>
-            {block.content.split("\n").map((line, lineIdx) => {
-              const isListItem = /^\s*[-*]\s+/.test(line);
-              const isOrderedItem = /^\s*\d+\.\s+/.test(line);
-              const isHeading = /^#{1,3}\s+/.test(line);
-
-              let cleanLine = line;
-              if (isListItem) cleanLine = line.replace(/^\s*[-*]\s+/, "");
-              if (isOrderedItem) cleanLine = line.replace(/^\s*\d+\.\s+/, "");
-              if (isHeading) cleanLine = line.replace(/^#{1,3}\s+/, "");
-
-              return (
-                <div
-                  key={`${blockIdx}-${lineIdx}`}
-                  className={`
-                    ${line.trim() === "" ? "h-3" : "min-h-[1.5em]"}
-                    ${isListItem || isOrderedItem ? "pl-4 relative" : ""}
-                    ${isHeading ? "font-semibold text-text mt-2" : ""}
-                  `}
-                >
-                  {(isListItem || isOrderedItem) && (
-                    <span className="absolute left-0 text-amber font-bold opacity-60 text-[10px] top-[0.2em]">
-                      {isListItem ? "●" : line.match(/^\s*(\d+\.)/)?.[1]}
-                    </span>
-                  )}
-                  {renderInline(cleanLine)}
-                </div>
-              );
-            })}
-          </div>
-        );
-      })}
-    </>
-  );
-}
-
-function renderInline(text: string) {
-  const parts = text.split(/(`[^`]+`)/g);
-  return parts.map((part, i) => {
-    if (part.startsWith("`") && part.endsWith("`")) {
-      return (
-        <code
-          key={i}
-          className="font-mono text-[11px] bg-surface-2 border border-border px-1 py-0.5 rounded text-amber"
-        >
-          {part.slice(1, -1)}
-        </code>
-      );
-    }
-    const boldParts = part.split(/(\*\*[^*]+\*\*)/g);
-    if (boldParts.length > 1) {
-      return boldParts.map((bp, j) => {
-        if (bp.startsWith("**") && bp.endsWith("**")) {
-          return (
-            <strong key={`${i}-${j}`} className="font-semibold text-text">
-              {bp.slice(2, -2)}
-            </strong>
-          );
-        }
-        return <span key={`${i}-${j}`}>{bp}</span>;
-      });
-    }
-    return <span key={i}>{part}</span>;
-  });
-}

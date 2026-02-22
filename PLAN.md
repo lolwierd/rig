@@ -83,7 +83,7 @@ Refined the experience and added advanced features.
 - **Content Loading**: Historical sessions load full message history including past tool calls.
 - **Tool Parsing**: Parsed `bash` commands and file operations from history.
 - **Markdown**: Improved rendering with code blocks and lists.
-- **Thinking Level**: Added UI to view and cycle thinking level (low/medium/high) for supported models (e.g. Claude 3.7).
+- **Thinking Level**: Added model-aware thinking controls (off/minimal/low/medium/high/xhigh depending on model capabilities) in dispatch and live session views.
 - **Extension UI**: Added support for interactive extension requests (confirm, select, input) via a modal overlay.
 
 ---

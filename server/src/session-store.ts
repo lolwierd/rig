@@ -140,9 +140,15 @@ async function parseSessionFile(filePath: string): Promise<SessionInfo | null> {
 						}
 					}
 
-					// Track last activity time from timestamps
-					const ts = msg.timestamp ?? (typeof entry.timestamp === "string" ? new Date(entry.timestamp).getTime() : undefined);
-					if (typeof ts === "number" && ts > 0) {
+					// Track last activity time from timestamps (number or ISO string)
+					const rawTs = msg.timestamp ?? entry.timestamp;
+					const ts =
+						typeof rawTs === "number"
+							? rawTs
+							: typeof rawTs === "string"
+								? new Date(rawTs).getTime()
+								: undefined;
+					if (typeof ts === "number" && Number.isFinite(ts) && ts > 0) {
 						lastActivityTime = Math.max(lastActivityTime ?? 0, ts);
 					}
 				}

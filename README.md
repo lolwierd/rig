@@ -7,8 +7,8 @@ Rig wraps `pi --mode rpc` as a web interface served over Tailscale — your pers
 ## What it looks like
 
 - **The Board** — a flat list of all sessions across all projects, newest first. Active sessions pulse. Tap to open.
-- **Session Log** — a work log, not a chatbot. Tool calls are first-class log entries (`read`, `edit`, `bash`, `write`) with the agent's prose interspersed.
-- **New Dispatch** — modal for sending work: pick a project, type a prompt, choose a model, go. Under 5 seconds.
+- **Session Log** — a work log, not a chatbot. Tool calls are first-class log entries (`read`, `edit`, `bash`, `write`) with markdown-rendered agent prose/thinking interspersed.
+- **New Dispatch** — modal for sending work: pick a project, type a prompt, choose a model, choose thinking level (when supported), go. Under 5 seconds.
 
 ## Quick start
 
@@ -41,12 +41,16 @@ browser ←→ Vite/static ←→ Fastify ←→ pi --mode rpc (child process)
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/api/sessions` | List all sessions (optional `?cwd=` filter) |
-| `POST` | `/api/dispatch` | Start a new session `{ cwd, message, provider?, model? }` |
+| `GET` | `/api/sessions/:id/entries?path=` | Read parsed JSONL entries for a session file |
+| `POST` | `/api/dispatch` | Start a new session `{ cwd, message, provider?, model?, thinkingLevel? }` |
 | `POST` | `/api/resume` | Resume an existing session `{ sessionFile, cwd }` |
 | `POST` | `/api/stop` | Kill an active session `{ bridgeId }` |
-| `WS` | `/api/ws/:bridgeId` | Live event stream for an active session |
+| `WS` | `/api/ws/:bridgeId` | Live event stream + command/response channel |
 | `GET` | `/api/models` | Enabled models + default from pi settings |
-| `GET` | `/api/projects` | Registered project directories |
+| `GET` | `/api/models/all` | All available models from pi runtime |
+| `GET` | `/api/models/capabilities` | Thinking levels for `{ provider, modelId }` |
+| `GET` | `/api/projects` | Registered + auto-discovered project directories |
+| `GET` | `/api/browse` | Directory browser data for project picker |
 
 ## Configuration
 

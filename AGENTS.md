@@ -23,11 +23,15 @@ Pi source code is at `../pi-mono/` for reference. Key packages:
 
 ## Current State
 
-**Phase 1 (Done):** Frontend shell — all UI components built, design system, responsive layout.
-**Phase 2 (Done):** Server built — Fastify backend reads pi's real session files + config. Frontend fetches real data.
-**Phase 3 (Next):** Live sessions — WebSocket proxy, dispatch, streaming events, session content loading.
+Rig is fully end-to-end functional and in active iteration.
 
-See `PLAN.md` for full phase breakdown and what's next.
+- Frontend shell is complete (board, session log, dispatch flow, responsive layouts).
+- Backend is complete (session/config reading, project registry, models/settings endpoints).
+- Live sessions are complete (pi RPC bridge, WebSocket streaming, dispatch/resume/stop).
+- Polish features are shipped (markdown rendering, model-aware thinking levels, extension UI requests).
+- Production setup is in place (build/start flow plus service configs).
+
+See `PLAN.md` for the historical implementation breakdown.
 
 ## Frontend Conventions
 
@@ -64,15 +68,18 @@ See `PLAN.md` for full phase breakdown and what's next.
 | GET | `/api/sessions` | List all sessions (with `?cwd=` filter) |
 | GET | `/api/sessions/:id/entries?path=` | Read session JSONL entries |
 | GET | `/api/models` | Enabled models + default from pi settings |
+| GET | `/api/models/all` | All available models from pi runtime |
+| GET | `/api/models/capabilities?provider=&modelId=` | Resolve supported thinking levels for a model |
 | GET | `/api/settings` | Raw pi settings |
-| GET | `/api/projects` | Registered projects |
+| GET | `/api/projects` | Registered + auto-discovered projects |
 | POST | `/api/projects` | Add project `{ path, name }` |
 | DELETE | `/api/projects` | Remove project `{ path }` |
-| POST | `/api/dispatch` | Spawn pi for new session `{ cwd, message, provider?, model? }` |
+| GET | `/api/browse` | Directory browser for project picker |
+| POST | `/api/dispatch` | Spawn pi for new session `{ cwd, message, provider?, model?, thinkingLevel? }` |
 | POST | `/api/resume` | Resume existing session `{ sessionFile, cwd }` |
 | POST | `/api/stop` | Kill active session `{ bridgeId }` |
 | GET | `/api/active` | List active pi bridges |
-| WS | `/api/ws/:bridgeId` | WebSocket for live session events |
+| WS | `/api/ws/:bridgeId` | WebSocket for live events + command/response forwarding |
 
 ## File Structure
 
