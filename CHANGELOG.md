@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.3.0
+
 - Added Markdown + GFM rendering for session directives, assistant prose, and thinking traces to improve readability of rich responses.
 - Added model capability resolution (`/api/models/capabilities`) and wired thinking-level UI to real per-model support (`off` through `xhigh` where available).
 - Improved active session continuity by synthesizing active rows before session files are flushed, buffering bridge events until WebSocket attach, and matching active sessions by both session path and session ID.
