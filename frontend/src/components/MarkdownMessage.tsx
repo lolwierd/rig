@@ -55,10 +55,37 @@ export function MarkdownMessage({ text, className }: MarkdownMessageProps) {
             );
           },
           hr: () => <hr className="my-3 border-border" />,
+          img: ({ src, alt }) => (
+            (() => {
+              const safeSrc = sanitizeImageSrc(typeof src === "string" ? src : "");
+              if (!safeSrc) {
+                return (
+                  <span className="inline-flex my-2 font-mono text-[10px] text-text-muted bg-surface-2 border border-border rounded px-2 py-1">
+                    blocked remote image
+                  </span>
+                );
+              }
+              return (
+                <img
+                  src={safeSrc}
+                  alt={alt || ""}
+                  loading="lazy"
+                  referrerPolicy="no-referrer"
+                  className="my-2 max-w-full max-h-[400px] rounded-lg border border-border object-contain"
+                />
+              );
+            })()
+          ),
         }}
       >
         {text}
       </ReactMarkdown>
     </div>
   );
+}
+
+export function sanitizeImageSrc(src: string): string | undefined {
+  if (src.startsWith("data:image/")) return src;
+  if (src.startsWith("blob:")) return src;
+  return undefined;
 }

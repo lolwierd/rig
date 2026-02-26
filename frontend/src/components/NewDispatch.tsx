@@ -1,6 +1,6 @@
 import { X, Search, FolderOpen, FolderPlus, ChevronDown } from "lucide-react";
-import { useState, useRef, useEffect, useMemo } from "react";
-import type { Project, ModelInfo, ThinkingLevel } from "../types";
+import { useState, useRef, useEffect, useMemo, useCallback } from "react";
+import type { Project, ModelInfo, ThinkingLevel, ImageBlock } from "../types";
 import { getProjectColor } from "../lib/utils";
 import { addProject, fetchModelCapabilities } from "../lib/api";
 import { FolderPicker } from "./FolderPicker";
@@ -15,6 +15,7 @@ interface NewDispatchProps {
     message: string,
     model: ModelInfo,
     thinkingLevel?: ThinkingLevel,
+    images?: ImageBlock[],
   ) => void;
   onClose: () => void;
   onProjectsChanged: () => void;
@@ -48,6 +49,7 @@ export function NewDispatch({
 }: NewDispatchProps) {
   const [selectedProject, setSelectedProject] = useState<Project | null>(projects[0] ?? null);
   const [message, setMessage] = useState("");
+  const [attachedImages, setAttachedImages] = useState<ImageBlock[]>([]);
   const [selectedModel, setSelectedModel] = useState<ModelInfo | null>(defaultModel ?? models[0] ?? null);
   const [selectedThinking, setSelectedThinking] = useState<ThinkingLevel>("medium");
   const [projectPickerOpen, setProjectPickerOpen] = useState(false);
@@ -124,13 +126,37 @@ export function NewDispatch({
     }
   }, [capabilityKnown, supportsThinking, supportedThinking, selectedThinking]);
 
+  const handlePaste = useCallback((e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (const item of items) {
+      if (item.type.startsWith("image/")) {
+        e.preventDefault();
+        const file = item.getAsFile();
+        if (!file) continue;
+        const reader = new FileReader();
+        reader.onload = () => {
+          const dataUrl = reader.result as string;
+          const mediaType = file.type || "image/png";
+          setAttachedImages((prev) => [...prev, { url: dataUrl, mediaType }]);
+        };
+        reader.readAsDataURL(file);
+      }
+    }
+  }, []);
+
+  const removeImage = useCallback((index: number) => {
+    setAttachedImages((prev) => prev.filter((_, i) => i !== index));
+  }, []);
+
   const handleSubmit = () => {
-    if (!selectedProject || !message.trim() || !selectedModel) return;
+    if (!selectedProject || (!message.trim() && attachedImages.length === 0) || !selectedModel) return;
     onDispatch(
       selectedProject.path,
       message.trim(),
       selectedModel,
       supportsThinking ? selectedThinking : undefined,
+      attachedImages.length > 0 ? attachedImages : undefined,
     );
   };
 
@@ -169,7 +195,6 @@ export function NewDispatch({
               <X size={16} />
             </button>
           </div>
-
           <div className="mb-3">
             <label className="mb-1.5 block font-mono text-[10px] uppercase tracking-widest text-text-muted">
               Project
@@ -277,9 +302,30 @@ export function NewDispatch({
               value={message}
               onChange={(e) => setMessage(e.target.value)}
               onKeyDown={handleKeyDown}
+              onPaste={handlePaste}
               rows={3}
               className="w-full resize-none rounded-lg border border-border bg-surface-2 px-3.5 py-3 text-[13px] leading-relaxed text-text placeholder:text-text-muted outline-none transition-colors focus:border-border-bright"
             />
+            {attachedImages.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-2">
+                {attachedImages.map((img, i) => (
+                  <div key={i} className="relative group">
+                    <img
+                      src={img.url}
+                      alt={`Attached ${i + 1}`}
+                      className="h-16 w-16 object-cover rounded-lg border border-border"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removeImage(i)}
+                      className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red text-bg rounded-full flex items-center justify-center text-[10px] opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           <div className="mt-4 flex flex-wrap items-end gap-2.5">
@@ -358,7 +404,7 @@ export function NewDispatch({
             <span className="font-mono text-[10px] text-text-muted">⌘+Enter to dispatch</span>
             <button
               onClick={handleSubmit}
-              disabled={!selectedProject || !message.trim()}
+              disabled={!selectedProject || (!message.trim() && attachedImages.length === 0)}
               className="h-9 rounded-lg bg-amber px-5 font-mono text-[12px] font-semibold tracking-wide text-bg transition-all cursor-pointer hover:brightness-110 disabled:cursor-not-allowed disabled:brightness-100 disabled:opacity-30"
             >
               Dispatch ↑

@@ -5,7 +5,7 @@
  * and production same-origin serving.
  */
 
-import type { Session, Project, ModelInfo, ThinkingLevel } from "../types";
+import type { Session, Project, ModelInfo, ThinkingLevel, ImageBlock } from "../types";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -141,8 +141,9 @@ export async function dispatch(
   provider?: string,
   model?: string,
   thinkingLevel?: ThinkingLevel,
+  images?: ImageBlock[],
 ): Promise<{ bridgeId: string; sessionId: string; sessionFile: string }> {
-  return post("/api/dispatch", { cwd, message, provider, model, thinkingLevel });
+  return post("/api/dispatch", { cwd, message, provider, model, thinkingLevel, images });
 }
 
 /** Resume an existing session */

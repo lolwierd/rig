@@ -16,7 +16,7 @@ import {
 } from "./lib/api";
 import { useSessionBridge } from "./hooks/useSessionBridge";
 import { ExtensionRequest } from "./components/ExtensionRequest";
-import type { Session, ModelInfo, Project, LogEntry, TouchedFile, ThinkingLevel } from "./types";
+import type { Session, ModelInfo, Project, LogEntry, TouchedFile, ThinkingLevel, ImageBlock } from "./types";
 
 // Stable empty arrays to avoid re-render loops in hooks
 const EMPTY_ENTRIES: LogEntry[] = [];
@@ -149,14 +149,16 @@ export default function App() {
 
             if (msg.role === "user") {
               const text = extractText(msg.content);
-              if (text) {
-                parsed.push({ type: "directive", text, timestamp });
+              const images = extractImages(msg.content);
+              if (text || images.length > 0) {
+                parsed.push({ type: "directive", text, timestamp, ...(images.length > 0 && { images }) });
               }
             } else if (msg.role === "assistant") {
               const text = extractText(msg.content);
               const thinking = extractThinking(msg.content);
-              if (text || thinking) {
-                parsed.push({ type: "prose", text, thinking: thinking || undefined });
+              const images = extractImages(msg.content);
+              if (text || thinking || images.length > 0) {
+                parsed.push({ type: "prose", text, thinking: thinking || undefined, ...(images.length > 0 && { images }) });
               }
 
               // Extract tool calls from content blocks
@@ -254,10 +256,11 @@ export default function App() {
       message: string,
       model: ModelInfo,
       thinkingLevel?: ThinkingLevel,
+      images?: ImageBlock[],
     ) => {
       try {
         setShowDispatch(false);
-        const res = await dispatch(projectPath, message, model.provider, model.modelId, thinkingLevel);
+        const res = await dispatch(projectPath, message, model.provider, model.modelId, thinkingLevel, images);
 
         // Create a placeholder session immediately — pi doesn't flush the
         // session file to disk until the first assistant message arrives, so
@@ -265,12 +268,17 @@ export default function App() {
         // logic in loadData() until the real file appears on disk.
         const sessionId = res.sessionId || res.bridgeId;
         const project = projects.find((p) => p.path === projectPath);
+        const firstMessage = message.trim()
+          ? message.slice(0, 200)
+          : images && images.length > 0
+            ? "[image attachment]"
+            : "";
         const placeholder: Session = {
           id: sessionId,
           path: res.sessionFile || `active://${res.bridgeId}`,
           cwd: projectPath,
           projectName: project?.name || projectPath.split("/").pop() || "unknown",
-          firstMessage: message.slice(0, 200),
+          firstMessage,
           status: "running",
           model: modelDisplayName(model.modelId),
           modelId: model.modelId,
@@ -298,7 +306,7 @@ export default function App() {
   );
 
   const handleSendMessage = useCallback(
-    async (message: string, mode: "steer" | "followUp") => {
+    async (message: string, mode: "steer" | "followUp", images?: ImageBlock[]) => {
       if (!selectedSession?.isActive) return;
 
       if (bridge.isStreaming) {
@@ -306,8 +314,10 @@ export default function App() {
       }
 
       try {
+        const piImages = toPiImages(images);
         await bridge.sendCommand("prompt", {
           message,
+          ...(piImages && { images: piImages }),
           streamingBehavior: mode,
         });
       } catch (err) {
@@ -544,6 +554,27 @@ function extractThinking(content: any): string {
     .join("");
 }
 
+function extractImages(content: any): ImageBlock[] {
+  if (!Array.isArray(content)) return [];
+  const images: ImageBlock[] = [];
+  for (const block of content) {
+    if (block.type === "image") {
+      if (block.data && block.mimeType) {
+        // Pi internal format: { type: "image", data: "<base64>", mimeType: "image/png" }
+        images.push({ url: `data:${block.mimeType};base64,${block.data}`, mediaType: block.mimeType });
+      } else if (block.source?.data) {
+        // Anthropic format: { type: "image", source: { type: "base64", media_type, data } }
+        const mediaType = block.source.media_type || "image/png";
+        images.push({ url: `data:${mediaType};base64,${block.source.data}`, mediaType });
+      }
+    } else if (block.type === "image_url" && block.image_url?.url && isSafeInlineImageUrl(block.image_url.url)) {
+      // OpenAI format
+      images.push({ url: block.image_url.url });
+    }
+  }
+  return images;
+}
+
 function trackFile(
   filesMap: Map<string, TouchedFile>,
   toolName: string,
@@ -557,4 +588,23 @@ function trackFile(
       timestamp,
     });
   }
+}
+
+/** Convert frontend ImageBlocks to pi's ImageContent format */
+function toPiImages(images?: ImageBlock[]): Array<{ type: "image"; data: string; mimeType: string }> | undefined {
+  if (!images || images.length === 0) return undefined;
+  const result: Array<{ type: "image"; data: string; mimeType: string }> = [];
+  for (const img of images) {
+    if (img.url.startsWith("data:")) {
+      const match = img.url.match(/^data:([^;]+);base64,(.+)$/);
+      if (match && match[1].startsWith("image/")) {
+        result.push({ type: "image", data: match[2], mimeType: match[1] });
+      }
+    }
+  }
+  return result.length > 0 ? result : undefined;
+}
+
+function isSafeInlineImageUrl(url: string): boolean {
+  return url.startsWith("data:image/") || url.startsWith("blob:");
 }

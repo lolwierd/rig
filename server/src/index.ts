@@ -20,6 +20,7 @@ async function main() {
 	const port = config.port;
 
 	const app = Fastify({
+		bodyLimit: 50 * 1024 * 1024, // 50MB — needed for image attachments
 		logger: {
 			level: "info",
 			transport: {

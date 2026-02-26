@@ -1,6 +1,6 @@
 import { ArrowLeft, Square, Play, Brain, ChevronRight, PanelLeft, FileText } from "lucide-react";
 import { useState, useRef, useEffect, useCallback } from "react";
-import type { Session, ThinkingLevel } from "../types";
+import type { Session, ThinkingLevel, ImageBlock } from "../types";
 import { ProjectBadge } from "./ProjectBadge";
 import { ToolCallLine } from "./ToolCallLine";
 import { MarkdownMessage } from "./MarkdownMessage";
@@ -8,7 +8,7 @@ import { MarkdownMessage } from "./MarkdownMessage";
 interface SessionLogProps {
   session: Session;
   onBack: () => void;
-  onSendMessage: (message: string, mode: "steer" | "followUp") => void;
+  onSendMessage: (message: string, mode: "steer" | "followUp", images?: ImageBlock[]) => void;
   onStop: () => void;
   onResume: () => void;
   onThinkingLevelChange: (level: ThinkingLevel) => void;
@@ -33,6 +33,7 @@ export function SessionLog({
   onToggleFiles,
 }: SessionLogProps) {
   const [input, setInput] = useState("");
+  const [attachedImages, setAttachedImages] = useState<ImageBlock[]>([]);
   const [messageMode, setMessageMode] = useState<"steer" | "followUp">("steer");
   const logEndRef = useRef<HTMLDivElement>(null);
   const logContainerRef = useRef<HTMLDivElement>(null);
@@ -73,17 +74,41 @@ export function SessionLog({
     });
   };
 
+  const handlePaste = useCallback((e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (const item of items) {
+      if (item.type.startsWith("image/")) {
+        e.preventDefault();
+        const file = item.getAsFile();
+        if (!file) continue;
+        const reader = new FileReader();
+        reader.onload = () => {
+          const dataUrl = reader.result as string;
+          const mediaType = file.type || "image/png";
+          setAttachedImages((prev) => [...prev, { url: dataUrl, mediaType }]);
+        };
+        reader.readAsDataURL(file);
+      }
+    }
+  }, []);
+
+  const removeImage = useCallback((index: number) => {
+    setAttachedImages((prev) => prev.filter((_, i) => i !== index));
+  }, []);
+
   const handleSubmit = (e?: React.SyntheticEvent, overrideMode?: "steer" | "followUp") => {
     e?.preventDefault();
-    if (!input.trim()) return;
+    if (!input.trim() && attachedImages.length === 0) return;
 
     // User explicitly sent a follow-up/steer message: force auto-scroll so
     // their message + assistant reply stays in view.
     shouldAutoScroll.current = true;
     scrollToBottom("smooth");
 
-    onSendMessage(input.trim(), overrideMode ?? messageMode);
+    onSendMessage(input.trim(), overrideMode ?? messageMode, attachedImages.length > 0 ? attachedImages : undefined);
     setInput("");
+    setAttachedImages([]);
   };
 
   const fileCount = session.touchedFiles.length;
@@ -195,6 +220,9 @@ export function SessionLog({
                   <span>{entry.timestamp}</span>
                 </div>
                 <div className="py-3 px-4 bg-surface-2/80 rounded-lg">
+                  {entry.images && entry.images.length > 0 && (
+                    <ImageGallery images={entry.images} />
+                  )}
                   <MarkdownMessage
                     text={entry.text}
                     className="text-[13px] text-text leading-[1.65]"
@@ -227,6 +255,9 @@ export function SessionLog({
                     streaming={!!entry.streaming && !entry.text}
                   />
                 )}
+                {entry.images && entry.images.length > 0 && (
+                  <ImageGallery images={entry.images} />
+                )}
                 {(entry.text || (!entry.thinking && entry.streaming)) && (
                   <div className="text-[13px] text-text leading-[1.65]">
                     <MarkdownMessage text={entry.text} />
@@ -254,6 +285,7 @@ export function SessionLog({
 
       {/* Input bar — only for active sessions */}
       {session.isActive && (
+        <>
         <form
           onSubmit={handleSubmit}
           className="flex items-center gap-2.5 px-4 py-3 border-t border-border bg-surface shrink-0"
@@ -274,6 +306,7 @@ export function SessionLog({
             placeholder="send steering/follow-up..."
             value={input}
             onChange={(e) => setInput(e.target.value)}
+            onPaste={handlePaste}
             onKeyDown={(e) => {
               if (e.key !== "Enter") return;
               if (e.altKey) {
@@ -288,12 +321,33 @@ export function SessionLog({
           />
           <button
             type="submit"
-            disabled={!input.trim()}
+            disabled={!input.trim() && attachedImages.length === 0}
             className="w-9 h-9 bg-amber text-bg rounded-lg flex items-center justify-center text-base font-bold cursor-pointer hover:brightness-110 transition-all disabled:opacity-30 disabled:cursor-not-allowed disabled:brightness-100"
           >
             ↑
           </button>
         </form>
+        {attachedImages.length > 0 && (
+          <div className="flex flex-wrap gap-2 px-4 pb-3 bg-surface">
+            {attachedImages.map((img, i) => (
+              <div key={i} className="relative group">
+                <img
+                  src={img.url}
+                  alt={`Attached ${i + 1}`}
+                  className="h-12 w-12 object-cover rounded-lg border border-border"
+                />
+                <button
+                  type="button"
+                  onClick={() => removeImage(i)}
+                  className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red text-bg rounded-full flex items-center justify-center text-[10px] opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        </>
       )}
     </div>
   );
@@ -325,6 +379,42 @@ function ThinkingBlock({ text, streaming }: { text: string; streaming: boolean }
           <MarkdownMessage text={text} className="text-[12px] text-text-dim leading-[1.6]" />
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── Image Gallery ────────────────────────────────────────────────────────
+
+function ImageGallery({ images }: { images: import("../types").ImageBlock[] }) {
+  const [expanded, setExpanded] = useState<number | null>(null);
+
+  return (
+    <div className="mb-2 flex flex-wrap gap-2">
+      {images.map((img, i) => (
+        <div key={i} className="relative group">
+          <button
+            onClick={() => setExpanded(expanded === i ? null : i)}
+            className="cursor-pointer rounded-lg overflow-hidden border border-border hover:border-border-bright transition-colors bg-surface-2"
+          >
+            <img
+              src={img.url}
+              alt={`Attached image ${i + 1}`}
+              className={`object-contain transition-all ${
+                expanded === i
+                  ? "max-w-full max-h-[80vh]"
+                  : "max-w-[240px] max-h-[180px]"
+              }`}
+            />
+          </button>
+          {expanded === i && (
+            <div className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity">
+              <span className="font-mono text-[9px] bg-bg/80 text-text-muted px-1.5 py-0.5 rounded">
+                {img.mediaType || "image"}
+              </span>
+            </div>
+          )}
+        </div>
+      ))}
     </div>
   );
 }

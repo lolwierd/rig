@@ -68,6 +68,23 @@ function extractText(content: any): string {
 	return "";
 }
 
+/** Convert frontend image data URLs to pi's ImageContent format */
+export function toPiImages(
+	images?: Array<{ url: string; mediaType?: string }>,
+): Array<{ type: "image"; data: string; mimeType: string }> | undefined {
+	if (!images || images.length === 0) return undefined;
+	const result: Array<{ type: "image"; data: string; mimeType: string }> = [];
+	for (const img of images) {
+		if (img.url.startsWith("data:")) {
+			const match = img.url.match(/^data:([^;]+);base64,(.+)$/);
+			if (match && match[1].startsWith("image/")) {
+				result.push({ type: "image", data: match[2], mimeType: match[1] });
+			}
+		}
+	}
+	return result.length > 0 ? result : undefined;
+}
+
 async function resolveThinkingLevelsForModel(provider: string, modelId: string): Promise<ThinkingLevel[]> {
 	let bridge: PiProcess | null = null;
 	const seen = new Set<ThinkingLevel>();
@@ -450,11 +467,12 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
 					provider?: string;
 					model?: string;
 					thinkingLevel?: ThinkingLevel;
+					images?: Array<{ url: string; mediaType?: string }>;
 				};
 			}>,
 			reply: FastifyReply,
 		) => {
-			const { cwd, message, provider, model, thinkingLevel } = req.body;
+			const { cwd, message, provider, model, thinkingLevel, images } = req.body;
 			if (!cwd) {
 				return reply.code(400).send({ error: "cwd is required" });
 			}
@@ -493,8 +511,9 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
 				// Send the initial prompt fire-and-forget — events are buffered until WS connects.
 				// We intentionally don't await a prompt response here to avoid blocking dispatch
 				// when the model starts streaming immediately.
-				if (message) {
-					sendRaw(bridge, { type: "prompt", message });
+				if (message || (images && images.length > 0)) {
+					const piImages = toPiImages(images);
+					sendRaw(bridge, { type: "prompt", message: message || "", ...(piImages && { images: piImages }) });
 				}
 
 				return {

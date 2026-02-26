@@ -17,12 +17,18 @@ export interface TouchedFile {
   timestamp?: number;
 }
 
+/** An image block extracted from message content */
+export interface ImageBlock {
+  url: string;
+  mediaType?: string;
+}
+
 /** A single entry in the session log */
 export type LogEntry =
-  | { type: "directive"; text: string; timestamp: string }
+  | { type: "directive"; text: string; timestamp: string; images?: ImageBlock[] }
   | { type: "system"; text: string; timestamp: string }
   | { type: "tool"; call: ToolCall }
-  | { type: "prose"; text: string; thinking?: string; streaming?: boolean }
+  | { type: "prose"; text: string; thinking?: string; streaming?: boolean; images?: ImageBlock[] }
   | { type: "error"; text: string; timestamp: string };
 
 /** Session status */

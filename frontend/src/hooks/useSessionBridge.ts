@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { wsUrl } from "../lib/api";
-import type { LogEntry, Session, ToolCall, TouchedFile, ExtensionUIRequest, ThinkingLevel } from "../types";
+import type { LogEntry, Session, ToolCall, TouchedFile, ExtensionUIRequest, ThinkingLevel, ImageBlock } from "../types";
 
 interface PendingCommand {
   resolve: (data: any) => void;
@@ -123,12 +123,14 @@ export function useSessionBridge(
         const { message } = event;
         if (message.role === "user") {
           const text = extractText(message.content);
-          const isDupe = last?.type === "directive" && last.text === text;
+          const images = extractImages(message.content);
+          const isDupe = shouldDedupeDirective(last, text, images);
           if (!isDupe) {
             next.push({
               type: "directive",
               text,
               timestamp: new Date().toLocaleTimeString(),
+              ...(images.length > 0 && { images }),
             });
           }
         } else if (message.role === "assistant") {
@@ -136,10 +138,11 @@ export function useSessionBridge(
         }
       } else if (event.type === "message_update") {
         const { text, thinking } = extractContent(event.message.content);
+        const images = extractImages(event.message.content);
         if (last?.type === "prose" && last.streaming) {
-          next[next.length - 1] = { ...last, text, thinking };
+          next[next.length - 1] = { ...last, text, thinking, ...(images.length > 0 && { images }) };
         } else {
-          next.push({ type: "prose", text, thinking, streaming: true });
+          next.push({ type: "prose", text, thinking, streaming: true, ...(images.length > 0 && { images }) });
         }
       } else if (event.type === "message_end") {
         if (last?.type === "prose" && last.streaming) {
@@ -362,6 +365,42 @@ function extractContent(content: any): { text: string; thinking: string } {
     return { text, thinking };
   }
   return { text: "", thinking: "" };
+}
+
+function extractImages(content: any): ImageBlock[] {
+  if (!Array.isArray(content)) return [];
+  const images: ImageBlock[] = [];
+  for (const block of content) {
+    if (block.type === "image") {
+      if (block.data && block.mimeType) {
+        // Pi internal format: { type: "image", data: "<base64>", mimeType: "image/png" }
+        images.push({ url: `data:${block.mimeType};base64,${block.data}`, mediaType: block.mimeType });
+      } else if (block.source?.data) {
+        // Anthropic format: { type: "image", source: { type: "base64", media_type, data } }
+        const mediaType = block.source.media_type || "image/png";
+        images.push({ url: `data:${mediaType};base64,${block.source.data}`, mediaType });
+      }
+    } else if (block.type === "image_url" && block.image_url?.url && isSafeInlineImageUrl(block.image_url.url)) {
+      // OpenAI format
+      images.push({ url: block.image_url.url });
+    }
+  }
+  return images;
+}
+
+export function isSafeInlineImageUrl(url: string): boolean {
+  return url.startsWith("data:image/") || url.startsWith("blob:");
+}
+
+export function areSameImages(a?: ImageBlock[], b?: ImageBlock[]): boolean {
+  const left = a ?? [];
+  const right = b ?? [];
+  if (left.length !== right.length) return false;
+  return left.every((img, i) => img.url === right[i].url && img.mediaType === right[i].mediaType);
+}
+
+export function shouldDedupeDirective(last: LogEntry | undefined, text: string, images: ImageBlock[]): boolean {
+  return last?.type === "directive" && last.text === text && areSameImages(last.images, images);
 }
 
 function extractResultText(result: any): string {
