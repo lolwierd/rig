@@ -1,0 +1,17 @@
+[Unit]
+Description=Rig — Server (API + WebSocket + frontend)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/rig-deploy/server
+ExecStart=__NODE_BIN_DIR__/node dist/index.js
+Restart=on-failure
+RestartSec=3
+Environment=NODE_ENV=production
+
+# Let node/pi find nvm-installed binaries (pi, etc.)
+Environment=PATH=__NODE_BIN_DIR__:/usr/local/bin:/usr/bin:/bin
+
+[Install]
+WantedBy=default.target

@@ -147,26 +147,32 @@ export function SessionLog({
           <span className="text-text-dim">{session.modelId || session.model}</span>
         </span>
 
-        {session.thinkingLevel && (
+        {(session.thinkingLevel || (thinkingLevels && thinkingLevels.length > 0)) && (
           <button
             onClick={() => {
               const levels = thinkingLevels && thinkingLevels.length > 0
                 ? thinkingLevels
                 : (["off", "minimal", "low", "medium", "high"] as ThinkingLevel[]);
-              const idx = Math.max(0, levels.indexOf(session.thinkingLevel as ThinkingLevel));
+              const current = (session.thinkingLevel || "off") as ThinkingLevel;
+              if (levels.length <= 1) return;
+              const idx = Math.max(0, levels.indexOf(current));
               const next = levels[(idx + 1) % levels.length];
               onThinkingLevelChange(next);
             }}
-            className={`h-7 inline-flex items-center rounded-md border px-2 font-mono text-[10px] uppercase tracking-wide transition-colors cursor-pointer shrink-0 ${
-              session.thinkingLevel === "high" || session.thinkingLevel === "xhigh"
+            className={`h-7 inline-flex items-center rounded-md border px-2 font-mono text-[10px] uppercase tracking-wide transition-colors shrink-0 ${
+              ((session.thinkingLevel || "off") === "high" || (session.thinkingLevel || "off") === "xhigh")
                 ? "border-amber/35 bg-amber/10 text-amber"
-                : session.thinkingLevel === "medium"
+                : (session.thinkingLevel || "off") === "medium"
                   ? "border-border-bright bg-surface-2 text-text-dim hover:text-text"
                   : "border-border bg-surface-2 text-text-muted hover:text-text"
-            }`}
-            title="Thinking level (click to cycle)"
+            } ${(thinkingLevels && thinkingLevels.length > 1) ? "cursor-pointer" : "cursor-default"}`}
+            title={(thinkingLevels && thinkingLevels.length > 1) ? "Thinking level (click to cycle)" : "Thinking level"}
           >
-            {session.thinkingLevel === "minimal" ? "min" : session.thinkingLevel === "medium" ? "med" : session.thinkingLevel}
+            {(session.thinkingLevel || "off") === "minimal"
+              ? "min"
+              : (session.thinkingLevel || "off") === "medium"
+                ? "med"
+                : (session.thinkingLevel || "off")}
           </button>
         )}
 

@@ -1,0 +1,17 @@
+[Unit]
+Description=Rig — Operator (notification watcher / Telegram bridge)
+After=network.target rig-server.service
+
+[Service]
+Type=simple
+WorkingDirectory=%h/rig-deploy/operator
+ExecStart=__NODE_BIN_DIR__/node dist/src/index.js
+Restart=on-failure
+RestartSec=3
+Environment=NODE_ENV=production
+
+# Let node/pi find nvm-installed binaries
+Environment=PATH=__NODE_BIN_DIR__:/usr/local/bin:/usr/bin:/bin
+
+[Install]
+WantedBy=default.target

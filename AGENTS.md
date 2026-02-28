@@ -121,3 +121,66 @@ cd frontend && npm run dev
 # Open: http://localhost:5173
 # Server API: http://localhost:3100
 ```
+
+## Deployment
+
+Rig runs as two separate **systemd user services** on the host machine. The deployment directory is `~/rig-deploy/` — completely separate from the source tree at `~/Projects/personal/rig/`.
+
+### Deploy directory layout
+
+```
+~/rig-deploy/
+├── server/          # compiled server JS (dist/) + node_modules
+├── operator/        # compiled operator JS (dist/) + node_modules
+└── frontend/        # built frontend static files (served by the server at runtime)
+```
+
+The server resolves `../../frontend/dist` relative to its own `dist/` dir, so it automatically finds `~/rig-deploy/frontend/dist` when running from `~/rig-deploy/server/`.
+
+### Services
+
+| Service | Unit file | What it runs |
+|---------|-----------|--------------|
+| `rig-server` | `ops/rig-server.service` | Fastify API + WebSocket bridge + serves frontend static files |
+| `rig-operator` | `ops/rig-operator.service` | Notification watcher / Telegram bridge |
+
+Both services are **systemd user units** (no root required), installed in `~/.config/systemd/user/`. Lingering is enabled so they survive reboots without a login session.
+
+### Deploying changes
+
+Run `./deploy.sh` from the project root. It:
+1. Builds frontend (`tsc -b && vite build`)
+2. Builds server (`tsc`)
+3. Builds operator (`tsc`)
+4. `rsync`s compiled output + `node_modules` into `~/rig-deploy/`
+5. Copies service unit files from `ops/` into `~/.config/systemd/user/`
+6. Reloads systemd and restarts both services
+
+```bash
+cd ~/Projects/personal/rig
+./deploy.sh
+```
+
+### Day-to-day service management
+
+```bash
+# Restart after a deploy
+systemctl --user restart rig-server
+systemctl --user restart rig-operator
+
+# Check status
+systemctl --user status rig-server
+systemctl --user status rig-operator
+
+# Follow logs
+journalctl --user -fu rig-server
+journalctl --user -fu rig-operator
+```
+
+### Service unit files
+
+- `ops/rig-server.service` — server service definition
+- `ops/rig-operator.service` — operator service definition
+- `ops/rig.service` — legacy combined service (replaced; kept for reference)
+
+The service template files in `ops/` use a `__NODE_BIN_DIR__` placeholder. `deploy.sh` resolves the current node binary path via `$(which node)` and substitutes it automatically — no manual updates needed when the node version changes.

@@ -14,9 +14,21 @@ export interface RigProject {
 	name: string;
 }
 
+export interface RigOperatorConfig {
+	telegram?: {
+		botToken?: string;
+		allowedChatIds?: number[];
+	};
+	defaultModel?: {
+		provider?: string;
+		modelId?: string;
+	};
+}
+
 export interface RigConfig {
 	port: number;
 	projects: RigProject[];
+	operator?: RigOperatorConfig;
 }
 
 const DEFAULT_CONFIG: RigConfig = {
@@ -43,6 +55,7 @@ export function loadConfig(): RigConfig {
 		return {
 			port: parsed.port ?? DEFAULT_CONFIG.port,
 			projects: Array.isArray(parsed.projects) ? parsed.projects : [],
+			operator: typeof parsed.operator === "object" && parsed.operator !== null ? parsed.operator : undefined,
 		};
 	} catch {
 		return { ...DEFAULT_CONFIG };

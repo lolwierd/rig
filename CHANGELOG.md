@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- Added **operator subsystem** — a standalone process (`operator/`) that bridges Rig with Telegram. Supports conversational dispatch, model/project/thinking-level pickers, session streaming into forum topics, and completion notifications via WebSocket watchers.
+- Added `deploy.sh` for one-command build + rsync deploy to `~/rig-deploy/` with systemd user service installation and restart.
+- Added `stop.sh` to cleanly shut down both systemd services and foreground dev processes.
+- Added systemd user service units for `rig-server` and `rig-operator` (`ops/`), plus a macOS launchd plist for the operator.
+- Added `CLAUDE.md` agent context file and `docs/API.md` + `docs/ARCHITECTURE.md` documentation.
+- Upgraded `start.sh` to a supervisor that builds and runs both server and operator, with signal handling and coordinated shutdown.
+- Removed the "show all models" toggle in ModelPicker — the full model registry now loads eagerly when the picker opens, and model entries show `provider / modelId`.
+- Fixed dispatch button remaining enabled when no model is selected by consolidating the submit-readiness check.
+- Improved thinking-level button in SessionLog to handle missing `thinkingLevel` gracefully, show the button when thinking levels are available, and disable cycling when only one level exists.
+- Added structured logging throughout server dispatch and WebSocket routes (request details, bridge lifecycle, message parsing).
+- Added `RigOperatorConfig` to server config to read the `operator` section from `rig.json`.
+- Made server log level configurable via `RIG_LOG_LEVEL` env var (default: `debug`).
+- Added unit tests for `api.ts`, `utils.ts`, `useSessionBridge`, `config.ts`, `file-tracker.ts`, and `session-store.ts`.
+
 ## 0.3.0
 
 - Added Markdown + GFM rendering for session directives, assistant prose, and thinking traces to improve readability of rich responses.

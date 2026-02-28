@@ -149,8 +149,10 @@ export function NewDispatch({
     setAttachedImages((prev) => prev.filter((_, i) => i !== index));
   }, []);
 
+  const canSubmit = !!selectedProject && !!selectedModel && (!!message.trim() || attachedImages.length > 0);
+
   const handleSubmit = () => {
-    if (!selectedProject || (!message.trim() && attachedImages.length === 0) || !selectedModel) return;
+    if (!canSubmit || !selectedProject || !selectedModel) return;
     onDispatch(
       selectedProject.path,
       message.trim(),
@@ -404,7 +406,7 @@ export function NewDispatch({
             <span className="font-mono text-[10px] text-text-muted">⌘+Enter to dispatch</span>
             <button
               onClick={handleSubmit}
-              disabled={!selectedProject || (!message.trim() && attachedImages.length === 0)}
+              disabled={!canSubmit}
               className="h-9 rounded-lg bg-amber px-5 font-mono text-[12px] font-semibold tracking-wide text-bg transition-all cursor-pointer hover:brightness-110 disabled:cursor-not-allowed disabled:brightness-100 disabled:opacity-30"
             >
               Dispatch ↑

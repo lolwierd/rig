@@ -26,7 +26,6 @@ export function ModelPicker({
   const [search, setSearch] = useState("");
   const [allModels, setAllModels] = useState<AllModel[]>([]);
   const [loading, setLoading] = useState(false);
-  const [showAll, setShowAll] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -34,16 +33,16 @@ export function ModelPicker({
     setTimeout(() => searchRef.current?.focus(), 50);
   }, []);
 
-  // Lazy-load all models when "Show all" is toggled
+  // Load full model registry when picker opens
   useEffect(() => {
-    if (showAll && allModels.length === 0) {
+    if (allModels.length === 0) {
       setLoading(true);
       fetchAllModels()
         .then(setAllModels)
         .catch(() => {})
         .finally(() => setLoading(false));
     }
-  }, [showAll, allModels.length]);
+  }, [allModels.length]);
 
   const scopedSet = useMemo(
     () => new Set(scopedModels.map((m) => `${m.provider}/${m.modelId}`)),
@@ -168,18 +167,8 @@ export function ModelPicker({
           </div>
         )}
 
-        {/* Toggle for all models */}
-        {!showAll && (
-          <button
-            onClick={() => setShowAll(true)}
-            className="w-full mx-auto my-1 px-3 py-2 text-center rounded-lg font-mono text-[11px] text-text-muted hover:text-amber hover:bg-amber/5 transition-colors cursor-pointer border border-dashed border-border hover:border-amber/30"
-          >
-            show all available models ({filteredScoped.length} hidden)
-          </button>
-        )}
-
         {/* Loading State */}
-        {showAll && loading && (
+        {loading && (
           <div className="flex flex-col items-center justify-center py-8 gap-2">
             <div className="w-4 h-4 border-2 border-amber border-t-transparent rounded-full animate-spin" />
             <span className="font-mono text-[10px] text-text-muted">
@@ -189,8 +178,7 @@ export function ModelPicker({
         )}
 
         {/* All models by provider */}
-        {showAll &&
-          !loading &&
+        {!loading &&
           Array.from(filteredAll.entries()).map(([provider, models]) => (
             <div key={provider} className="mt-2 first:mt-0">
               <div className="sticky top-0 z-10 bg-surface/95 backdrop-blur-sm px-3 py-2 border-b border-border/50 font-mono text-[10px] font-medium tracking-widest text-text-muted/70 uppercase flex items-center gap-2">
@@ -233,7 +221,7 @@ export function ModelPicker({
                           )}
                         </div>
                         <span className="font-mono text-[10px] opacity-60 truncate">
-                          {m.modelId}
+                          {m.provider} / {m.modelId}
                         </span>
                       </div>
                       {isSelected && <Check size={14} className="text-amber" />}
@@ -244,7 +232,7 @@ export function ModelPicker({
             </div>
           ))}
 
-        {showAll && !loading && filteredAll.size === 0 && q && (
+        {!loading && filteredAll.size === 0 && q && (
           <div className="px-3 py-8 text-center font-mono text-[11px] text-text-muted">
             no models match "{q}"
           </div>

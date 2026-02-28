@@ -19,8 +19,8 @@ Rig wraps `pi --mode rpc` as a web interface served over Tailscale — your pers
 cd server && npm install && npm run dev    # Fastify on :3100
 cd frontend && npm install && npm run dev  # Vite on :5173
 
-# Production (single process)
-./start.sh   # builds both, serves on :3100
+# Production (top-level supervisor)
+./start.sh   # builds frontend/server/operator, serves Rig on :3100, operator REST on :3200
 ```
 
 Open `http://localhost:5173` (dev) or `http://localhost:3100` (production).
@@ -59,6 +59,16 @@ Rig stores its config at `~/.pi/agent/rig.json`:
 ```json
 {
   "port": 3100,
+  "operator": {
+    "telegram": {
+      "botToken": "123:abc",
+      "allowedChatIds": [123456789]
+    },
+    "defaultModel": {
+      "provider": "openai",
+      "modelId": "gpt-5"
+    }
+  },
   "projects": [
     { "path": "/home/you/projects/my-app", "name": "my-app" }
   ]
@@ -68,13 +78,15 @@ Rig stores its config at `~/.pi/agent/rig.json`:
 Projects are also auto-discovered from pi's session history — any directory where you've previously run pi will appear automatically.
 
 Model configuration (enabled models, default model, API keys) is read from pi's own `~/.pi/agent/settings.json`.
+The optional `operator` section is shared with the Telegram/REST operator process.
+`operator.defaultModel` controls the operator assistant's own conversation model. It does not automatically select the model for dispatched Rig coding sessions; those still require an explicit model choice.
 
 ## Deployment
 
 The `ops/` directory has service configs for running Rig as a daemon:
 
-- **macOS** — `ops/com.lolwierd.rig.plist` (launchd)
-- **Linux** — `ops/rig.service` (systemd)
+- **macOS** — `ops/com.lolwierd.rig.plist` and `ops/com.lolwierd.rig-operator.plist` (launchd)
+- **Linux** — `ops/rig.service` and `ops/rig-operator.service` (systemd)
 
 Intended to run on a home server or dev machine accessible over [Tailscale](https://tailscale.com/), so you can dispatch work from anywhere.
 

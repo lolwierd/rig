@@ -18,11 +18,12 @@ import { killAll } from "./pi-bridge.js";
 async function main() {
 	const config = loadConfig();
 	const port = config.port;
+	const logLevel = process.env.RIG_LOG_LEVEL || "debug";
 
 	const app = Fastify({
 		bodyLimit: 50 * 1024 * 1024, // 50MB — needed for image attachments
 		logger: {
-			level: "info",
+			level: logLevel,
 			transport: {
 				target: "pino-pretty",
 				options: {
@@ -81,6 +82,7 @@ async function main() {
 
 	try {
 		await app.listen({ port, host: "0.0.0.0" });
+		app.log.info({ port, logLevel }, "rig server listening");
 		console.log(`\n  ⚙  rig server running on http://localhost:${port}\n`);
 	} catch (err) {
 		app.log.error(err);

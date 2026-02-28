@@ -473,6 +473,17 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
 			reply: FastifyReply,
 		) => {
 			const { cwd, message, provider, model, thinkingLevel, images } = req.body;
+			app.log.info(
+				{
+					cwd,
+					provider,
+					model,
+					thinkingLevel,
+					messageLength: message?.length || 0,
+					imageCount: images?.length || 0,
+				},
+				"dispatch requested",
+			);
 			if (!cwd) {
 				return reply.code(400).send({ error: "cwd is required" });
 			}
@@ -482,6 +493,7 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
 
 			try {
 				const bridge = await spawnPi({ cwd, provider, model });
+				app.log.info({ bridgeId: bridge.id, cwd }, "dispatch bridge spawned");
 				const active = registerSession(bridge);
 				active.initialMessage = message?.trim() ? message.trim().slice(0, 200) : undefined;
 				active.thinkingLevel = thinkingLevel;
@@ -514,14 +526,17 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
 				if (message || (images && images.length > 0)) {
 					const piImages = toPiImages(images);
 					sendRaw(bridge, { type: "prompt", message: message || "", ...(piImages && { images: piImages }) });
+					app.log.debug({ bridgeId: bridge.id, hasPrompt: !!message, imageCount: piImages?.length || 0 }, "dispatch initial prompt sent");
 				}
 
+				app.log.info({ bridgeId: bridge.id, sessionId: bridge.sessionId, sessionFile: bridge.sessionFile }, "dispatch ready");
 				return {
 					bridgeId: bridge.id,
 					sessionId: bridge.sessionId || sessionState?.sessionId || bridge.id,
 					sessionFile: bridge.sessionFile || sessionState?.sessionFile,
 				};
 			} catch (err: any) {
+				app.log.error({ err }, "dispatch failed");
 				return reply.code(500).send({ error: err.message });
 			}
 		},
@@ -599,9 +614,11 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
 		{ websocket: true },
 		function (socket, req) {
 			const { bridgeId } = req.params;
+			app.log.info({ bridgeId }, "ws client connecting");
 			const session = activeSessions.get(bridgeId);
 
 			if (!session) {
+				app.log.warn({ bridgeId }, "ws connect failed: session not found");
 				socket.close(4004, "Session not found");
 				return;
 			}
@@ -659,6 +676,7 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
 
 				try {
 					const msg = JSON.parse(raw.toString());
+					app.log.debug({ bridgeId, messageType: msg?.type }, "ws message received");
 
 					if (!msg || typeof msg !== "object" || typeof msg.type !== "string") {
 						sendWsError(undefined, "Malformed WS message");
@@ -673,6 +691,7 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
 
 						// Forward command to pi and send response back
 						try {
+							app.log.debug({ bridgeId, commandType: msg.command?.type, requestId: msg.requestId }, "forwarding ws command to bridge");
 							const response = await sendCommand(session.bridge, msg.command);
 							if (socket.readyState === 1) {
 								socket.send(
@@ -684,6 +703,7 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
 								);
 							}
 						} catch (err: any) {
+							app.log.warn({ bridgeId, requestId: msg.requestId, err }, "ws command failed");
 							sendWsError(msg.requestId, err.message || "Command failed");
 						}
 					} else if (msg.type === "extension_ui_response") {
@@ -703,12 +723,14 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
 						sendWsError(msg.requestId, `Unknown WS message type: ${msg.type}`);
 					}
 				} catch {
+					app.log.warn({ bridgeId }, "failed to parse ws message");
 					sendWsError(undefined, "Failed to parse WS message");
 				}
 			});
 
 			// Handle disconnect
 			socket.on("close", () => {
+				app.log.info({ bridgeId }, "ws client disconnected");
 				session.wsClients.delete(socket);
 			});
 		},
