@@ -96,6 +96,14 @@ export function useSessionBridge(
       setIsStreaming(true);
     } else if (event.type === "agent_end") {
       setIsStreaming(false);
+      // Safety net: clear any lingering streaming flags when the agent turn ends
+      setEntries((prev) => {
+        const hasStreaming = prev.some((e) => e.type === "prose" && e.streaming);
+        if (!hasStreaming) return prev;
+        return prev.map((entry) =>
+          entry.type === "prose" && entry.streaming ? { ...entry, streaming: false } : entry,
+        );
+      });
     }
 
     if (event.type === "thinking_level_change") {
@@ -139,14 +147,34 @@ export function useSessionBridge(
       } else if (event.type === "message_update") {
         const { text, thinking } = extractContent(event.message.content);
         const images = extractImages(event.message.content);
-        if (last?.type === "prose" && last.streaming) {
-          next[next.length - 1] = { ...last, text, thinking, ...(images.length > 0 && { images }) };
+        // Find the streaming prose entry by searching backwards — tool calls
+        // may have been inserted after message_start, so it's not always last.
+        let found = -1;
+        for (let i = next.length - 1; i >= 0; i--) {
+          if (next[i].type === "prose" && (next[i] as any).streaming) {
+            found = i;
+            break;
+          }
+        }
+
+        if (found !== -1) {
+          next[found] = {
+            ...(next[found] as any),
+            text,
+            thinking,
+            ...(images.length > 0 && { images }),
+          };
         } else {
           next.push({ type: "prose", text, thinking, streaming: true, ...(images.length > 0 && { images }) });
         }
       } else if (event.type === "message_end") {
-        if (last?.type === "prose" && last.streaming) {
-          next[next.length - 1] = { ...last, streaming: false };
+        // Find and clear the streaming prose entry by searching backwards.
+        for (let i = next.length - 1; i >= 0; i--) {
+          const entry = next[i];
+          if (entry.type === "prose" && entry.streaming) {
+            next[i] = { ...entry, streaming: false };
+            break;
+          }
         }
       } else if (event.type === "tool_execution_start") {
         const { toolName, args, toolCallId } = event;

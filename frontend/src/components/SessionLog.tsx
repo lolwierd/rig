@@ -140,11 +140,11 @@ export function SessionLog({
           {session.name || session.firstMessage}
         </span>
 
-        {/* Provider / full model ID */}
-        <span className="hidden sm:flex font-mono text-[10px] bg-surface-2 border border-border rounded-md px-2.5 py-1 items-center gap-1 shrink-0">
-          <span className="text-text-muted">{session.provider}</span>
-          <span className="text-text-muted">/</span>
-          <span className="text-text-dim">{session.modelId || session.model}</span>
+        {/* Provider / model ID — truncated on mobile, full on desktop */}
+        <span className="flex font-mono text-[10px] bg-surface-2 border border-border rounded-md px-2.5 py-1 items-center gap-1 shrink-0 max-w-[120px] sm:max-w-none truncate">
+          <span className="hidden sm:inline text-text-muted">{session.provider}</span>
+          <span className="hidden sm:inline text-text-muted">/</span>
+          <span className="text-text-dim truncate">{session.modelId || session.model}</span>
         </span>
 
         {(session.thinkingLevel || (thinkingLevels && thinkingLevels.length > 0)) && (
