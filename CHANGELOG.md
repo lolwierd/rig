@@ -4,6 +4,7 @@
 
 - Fixed assistant streaming updates in `useSessionBridge` by tracking the active streaming prose entry even when tool events are interleaved, and by clearing lingering streaming flags at `agent_end`.
 - Improved SessionLog model badge responsiveness by showing a truncated model ID on mobile while preserving full `provider / modelId` context on larger screens.
+- Updated project docs (`README.md`, `PLAN.md`, `docs/API.md`, `docs/ARCHITECTURE.md`, `docs/index.html`) to reflect current deployment units and metadata-based model capability resolution.
 - Added **operator subsystem** — a standalone process (`operator/`) that bridges Rig with Telegram. Supports conversational dispatch, model/project/thinking-level pickers, session streaming into forum topics, and completion notifications via WebSocket watchers.
 - Added `deploy.sh` for one-command build + rsync deploy to `~/rig-deploy/` with systemd user service installation and restart.
 - Added `stop.sh` to cleanly shut down both systemd services and foreground dev processes.

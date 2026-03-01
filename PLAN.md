@@ -93,12 +93,15 @@ Refined the experience and added advanced features.
 Prepared for deployment.
 
 **Features:**
-- **Build Pipeline**: `tsc` + `vite build` for frontend, `tsc` for server.
-- **Startup Script**: `start.sh` to build and run.
+- **Build Pipeline**: `tsc -b && vite build` for frontend, `tsc` for server and operator.
+- **Deploy Script**: `deploy.sh` for one-command build + rsync deploy to `~/rig-deploy/` + service restart.
+- **Startup Script**: `start.sh` to build and run server + operator locally.
 - **Process Management**:
-  - `ops/rig.service` (Systemd)
-  - `ops/com.lolwierd.rig.plist` (Launchd)
-- **Static Serving**: Server serves the built frontend from `frontend/dist/`.
+  - `ops/rig-server.service` (Systemd user service)
+  - `ops/rig-operator.service` (Systemd user service)
+  - `ops/com.lolwierd.rig.plist` and `ops/com.lolwierd.rig-operator.plist` (Launchd)
+  - `ops/rig.service` kept as legacy reference.
+- **Static Serving**: Server serves the built frontend from `frontend/dist/` in source and `~/rig-deploy/frontend/dist/` in deployed mode.
 
 ---
 

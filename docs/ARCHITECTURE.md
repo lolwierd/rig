@@ -230,7 +230,7 @@ The session store parses just enough from each file to build the board listing: 
 ```
 GET /api/models     → reads ~/.pi/agent/settings.json (enabledModels, defaults)
 GET /api/models/all → queries pi RPC: get_available_models (cached)
-GET /api/models/capabilities → spawns temp pi, cycles thinking levels (cached 5min)
+GET /api/models/capabilities → spawns temp pi, resolves from model metadata (cached 5min)
 ```
 
 ---

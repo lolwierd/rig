@@ -527,8 +527,8 @@ graph LR
                     <div class="component-card">
                         <div class="component-title">ModelPicker.tsx <span class="role">Model Selector</span></div>
                         <p class="component-desc">Popover menu for model selection. Searchable list of enabled
-                            models (shortcuts). "Show all" expands to the full registry grouped by provider, fetched
-                            via <code>GET /api/models/all</code>. Two-line layout: display name + model ID.</p>
+                            models (shortcuts), with full model registry loaded on open via
+                            <code>GET /api/models/all</code>. Two-line layout: display name + model ID.</p>
                     </div>
                     <div class="component-card">
                         <div class="component-title">FolderPicker.tsx <span class="role">Directory Browser</span>
@@ -790,7 +790,7 @@ graph LR
                         <tr>
                             <td><span class="method-badge method-post">POST</span></td>
                             <td><code>/api/dispatch</code></td>
-                            <td>Spawn a new Pi session. Body: <code>{ cwd, message, provider?, model? }</code>.
+                            <td>Spawn a new Pi session. Body: <code>{ cwd, message, provider?, model?, thinkingLevel? }</code>.
                                 Returns <code>{ bridgeId, sessionId, sessionFile }</code>.</td>
                         </tr>
                         <tr>

@@ -86,7 +86,11 @@ The optional `operator` section is shared with the Telegram/REST operator proces
 The `ops/` directory has service configs for running Rig as a daemon:
 
 - **macOS** — `ops/com.lolwierd.rig.plist` and `ops/com.lolwierd.rig-operator.plist` (launchd)
-- **Linux** — `ops/rig.service` and `ops/rig-operator.service` (systemd)
+- **Linux** — `ops/rig-server.service` and `ops/rig-operator.service` (systemd user services)
+
+Use `./deploy.sh` to build frontend/server/operator, sync artifacts into `~/rig-deploy/`, install unit files, and restart services.
+
+> `ops/rig.service` is a legacy combined unit kept for reference.
 
 Intended to run on a home server or dev machine accessible over [Tailscale](https://tailscale.com/), so you can dispatch work from anywhere.
 

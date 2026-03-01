@@ -166,7 +166,7 @@ If an active pi bridge exists, it queries that bridge. Otherwise, it spawns a te
 
 Resolve the supported thinking levels for a specific model. Results are cached for 5 minutes.
 
-Spawns a temporary pi process, sets the model, and cycles through thinking levels to discover which are available.
+Spawns a temporary pi process and inspects model metadata to derive supported thinking levels (without mutating global pi defaults).
 
 **Query parameters:**
 
