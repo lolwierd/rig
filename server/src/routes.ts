@@ -85,40 +85,32 @@ export function toPiImages(
 	return result.length > 0 ? result : undefined;
 }
 
+function modelSupportsXhigh(modelId: string): boolean {
+	// Keep in sync with pi-ai supportsXhigh() semantics.
+	return modelId.includes("gpt-5.2");
+}
+
 async function resolveThinkingLevelsForModel(provider: string, modelId: string): Promise<ThinkingLevel[]> {
 	let bridge: PiProcess | null = null;
-	const seen = new Set<ThinkingLevel>();
 	try {
+		// IMPORTANT: Do not call set_model / cycle_thinking_level here.
+		// Those commands mutate global pi settings (default model/thinking level),
+		// which can affect other sessions. We resolve capabilities from model metadata only.
 		bridge = await spawnPi({ cwd: process.cwd() });
-
-		const setResp = await sendCommand(bridge, { type: "set_model", provider, modelId }, 10000);
-		if (!setResp?.success) {
-			throw new Error(setResp?.error || `Model not found: ${provider}/${modelId}`);
+		const resp = await sendCommand(bridge, { type: "get_available_models" }, 10000);
+		if (!resp?.success || !resp?.data?.models) {
+			throw new Error(resp?.error || "Failed to fetch models");
 		}
 
-		const stateResp = await sendCommand(bridge, { type: "get_state" }, 10000);
-		if (!stateResp?.success) throw new Error(stateResp?.error || "Failed to fetch state");
-
-		const model = stateResp.data?.model;
-		const reasoning = !!model?.reasoning;
-		const startLevel = (stateResp.data?.thinkingLevel || "off") as ThinkingLevel;
-
-		if (!reasoning) {
-			return ["off"];
+		const target = (resp.data.models as Array<any>).find((m) => m.provider === provider && m.id === modelId);
+		if (!target) {
+			throw new Error(`Model not found: ${provider}/${modelId}`);
 		}
 
-		seen.add(startLevel);
-		for (let i = 0; i < THINKING_LEVEL_ORDER.length + 2; i++) {
-			const cycleResp = await sendCommand(bridge, { type: "cycle_thinking_level" }, 10000);
-			if (!cycleResp?.success || !cycleResp?.data?.level) break;
-			const level = cycleResp.data.level as ThinkingLevel;
-			if (seen.has(level)) break;
-			seen.add(level);
-		}
-
-		await sendCommand(bridge, { type: "set_thinking_level", level: startLevel }, 5000).catch(() => {});
-		const levels = THINKING_LEVEL_ORDER.filter((l) => seen.has(l));
-		return levels.length > 0 ? levels : ["off", "minimal", "low", "medium", "high"];
+		if (!target.reasoning) return ["off"];
+		return modelSupportsXhigh(modelId)
+			? ["off", "minimal", "low", "medium", "high", "xhigh"]
+			: ["off", "minimal", "low", "medium", "high"];
 	} finally {
 		if (bridge) killBridge(bridge);
 	}

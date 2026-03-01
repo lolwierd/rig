@@ -15,6 +15,7 @@
 - Added `RigOperatorConfig` to server config to read the `operator` section from `rig.json`.
 - Made server log level configurable via `RIG_LOG_LEVEL` env var (default: `debug`).
 - Added unit tests for `api.ts`, `utils.ts`, `useSessionBridge`, `config.ts`, `file-tracker.ts`, and `session-store.ts`.
+- Fixed model capability probing (`/api/models/capabilities`) to avoid mutating global pi defaults; capability detection is now metadata-based and covered by regression tests.
 
 ## 0.3.0
 
