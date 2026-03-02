@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Added Telegram private-chat draft streaming via Bot API `sendMessageDraft` for smoother operator turn updates, while keeping `editMessageText`-based streaming for group topics.
+- Updated `deploy.sh` to install dependencies with `NODE_ENV=development` during builds so production dependency pruning does not break TypeScript build tooling.
+
 - Fixed assistant streaming updates in `useSessionBridge` by tracking the active streaming prose entry even when tool events are interleaved, and by clearing lingering streaming flags at `agent_end`.
 - Improved SessionLog model badge responsiveness by showing a truncated model ID on mobile while preserving full `provider / modelId` context on larger screens.
 - Updated project docs (`README.md`, `PLAN.md`, `docs/API.md`, `docs/ARCHITECTURE.md`, `docs/index.html`) to reflect current deployment units and metadata-based model capability resolution.

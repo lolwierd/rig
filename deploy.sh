@@ -15,17 +15,17 @@ done
 
 echo "==> Building frontend..."
 cd "$RIG_DIR/frontend"
-npm install --silent
+NODE_ENV=development npm install --silent
 npm run build
 
 echo "==> Building server..."
 cd "$RIG_DIR/server"
-npm install --silent
+NODE_ENV=development npm install --silent
 npm run build
 
 echo "==> Building operator..."
 cd "$RIG_DIR/operator"
-npm install --silent
+NODE_ENV=development npm install --silent
 npm run build
 
 echo "==> Deploying to $DEPLOY_DIR ..."

@@ -93,6 +93,34 @@ async function withTelegramRetry<T>(fn: () => Promise<T>, maxAttempts = 3): Prom
   }
 }
 
+// --- sendMessageDraft support (Telegram Bot API 9.3) ---
+// Monotonically incrementing counter for draft IDs (must be non-zero).
+let _draftIdSeq = 0;
+function nextDraftId(): number {
+  _draftIdSeq = _draftIdSeq >= 0x7fffffff ? 1 : _draftIdSeq + 1;
+  return _draftIdSeq;
+}
+
+/**
+ * Sends a streaming draft to a private chat using sendMessageDraft (Bot API 9.3+).
+ * Only works in private chats (chat_id must be a positive integer user ID).
+ * The draft is automatically replaced when sendMessage is called afterward.
+ */
+async function sendTelegramDraft(
+  telegram: any,
+  chatId: number,
+  draftId: number,
+  text: string,
+  threadId?: number,
+): Promise<void> {
+  await (telegram as any).callApi("sendMessageDraft", {
+    chat_id: chatId,
+    draft_id: draftId,
+    text: (text || "...").slice(0, 4096),
+    ...(threadId !== undefined ? { message_thread_id: threadId } : {}),
+  });
+}
+
 function escapeMarkdownV2(input: string): string {
   return input.replace(/[_*\[\]()~`>#+\-=|{}.!\\]/g, "\\$&");
 }
@@ -587,9 +615,18 @@ export async function startTelegramBot(config: OperatorConfig, sessions: Session
       threadId,
     });
 
-    const startMsg = await ctx.telegram.sendMessage(chatId, `Connected to ${bridgeId} in ${topicName}. New non-command messages in this topic will be forwarded to this session.`, {
-      message_thread_id: threadId,
-    });
+    // sendMessageDraft only works in private chats (Bot API 9.3+).
+    const isPrivateChat = (chat as any).type === "private";
+    const bridgeDraftId = isPrivateChat ? nextDraftId() : 0;
+
+    // Send the connection notification. For non-private chats this doubles as the
+    // streaming placeholder (we'll editMessageText it); for private chats we leave
+    // it alone and stream via sendMessageDraft instead.
+    const startMsg = await ctx.telegram.sendMessage(
+      chatId,
+      `Connected to ${bridgeId} in ${topicName}. New non-command messages in this topic will be forwarded to this session.`,
+      { message_thread_id: threadId },
+    );
 
     const backlog = await fetchRecentBridgeMessages(config.rigUrl, found.sessionId, found.sessionFile, 6);
     if (backlog.length > 0) {
@@ -601,7 +638,9 @@ export async function startTelegramBot(config: OperatorConfig, sessions: Session
     }
 
     let lastEdit = 0;
-    const editThrottleMs = 700;
+    // Private chats: use faster 400 ms throttle (sendMessageDraft is designed for
+    // frequent updates). Group chats: keep 700 ms to avoid editMessageText rate limits.
+    const editThrottleMs = isPrivateChat ? 400 : 700;
     let latestText = "";
 
     ws.on("message", async (raw) => {
@@ -616,7 +655,17 @@ export async function startTelegramBot(config: OperatorConfig, sessions: Session
               const now = Date.now();
               if (now - lastEdit >= editThrottleMs) {
                 lastEdit = now;
-                await ctx.telegram.editMessageText(chatId, startMsg.message_id, undefined, latestText.slice(0, TELEGRAM_TEXT_LIMIT));
+                if (isPrivateChat) {
+                  try {
+                    // Animated streaming draft — no rate-limit concerns.
+                    await sendTelegramDraft(ctx.telegram, chatId, bridgeDraftId, latestText, threadId);
+                  } catch {
+                    // sendMessageDraft unsupported or failed; silently skip this update.
+                  }
+                } else {
+                  // Group chat: edit the notification message as a streaming placeholder.
+                  await ctx.telegram.editMessageText(chatId, startMsg.message_id, undefined, latestText.slice(0, TELEGRAM_TEXT_LIMIT));
+                }
               }
             }
           }
@@ -624,7 +673,14 @@ export async function startTelegramBot(config: OperatorConfig, sessions: Session
 
         if (data.type === "exit") {
           const finalText = latestText || `Session ${bridgeId} exited.`;
-          await ctx.telegram.editMessageText(chatId, startMsg.message_id, undefined, finalText.slice(0, TELEGRAM_TEXT_LIMIT));
+          if (isPrivateChat) {
+            // Sending a real message causes the draft to disappear automatically.
+            await ctx.telegram.sendMessage(chatId, finalText.slice(0, TELEGRAM_TEXT_LIMIT), {
+              ...(threadId !== undefined ? { message_thread_id: threadId } : {}),
+            });
+          } else {
+            await ctx.telegram.editMessageText(chatId, startMsg.message_id, undefined, finalText.slice(0, TELEGRAM_TEXT_LIMIT));
+          }
           ws.close();
           activeStreamSockets.delete(streamKey);
           topicToBridge.delete(topicKey(chatId, threadId));
@@ -1355,7 +1411,16 @@ export async function startTelegramBot(config: OperatorConfig, sessions: Session
     const textPrompt = "text" in ctx.message ? ctx.message.text : (ctx.message.caption || "Analyze this image.");
     const images = await extractPhotoAsDataUrl(ctx);
 
-    const placeholder = await withTelegramRetry(() => ctx.reply("\\.\\.\\.", { parse_mode: "MarkdownV2" }));
+    // sendMessageDraft only works in private chats (Bot API 9.3+).
+    // Group/supergroup/channel chats fall back to the placeholder + editMessageText approach.
+    const isPrivate = ctx.chat.type === "private";
+    const turnDraftId = isPrivate ? nextDraftId() : 0;
+
+    // For group chats we need a placeholder message to edit while streaming.
+    // For private chats we'll stream via sendMessageDraft instead — no placeholder needed.
+    const placeholder = isPrivate
+      ? null
+      : await withTelegramRetry(() => ctx.reply("\\.\\.\\.", { parse_mode: "MarkdownV2" }));
 
     const turnStartedAt = Date.now();
     logInfo("operator turn started", {
@@ -1364,26 +1429,45 @@ export async function startTelegramBot(config: OperatorConfig, sessions: Session
       threadId: currentThreadId,
       promptLength: textPrompt.length,
       hasImages: !!images?.length,
-      placeholderMessageId: placeholder.message_id,
+      streamMode: isPrivate ? "sendMessageDraft" : "editMessageText",
+      ...(placeholder ? { placeholderMessageId: placeholder.message_id } : {}),
     });
 
     const seenTools: string[] = [];
     let latestAssistantText = "";
-    let lastEdit = 0;
-    const throttleMs = 1200;
+    let lastStreamUpdate = 0;
+    // Private chats: 400 ms (sendMessageDraft handles frequent updates natively).
+    // Group chats: 1200 ms (editMessageText has strict rate limits).
+    const streamThrottleMs = isPrivate ? 400 : 1200;
 
-    const edit = async (body: string): Promise<void> => {
+    /**
+     * Push a streaming update to the user.
+     * - Private chats: sends an animated draft (plain text, no MarkdownV2 escaping needed).
+     * - Group chats: edits the placeholder message with MarkdownV2-formatted text.
+     */
+    const streamUpdate = async (formattedBody: string, plainText: string): Promise<void> => {
       const now = Date.now();
-      if (now - lastEdit < throttleMs) return;
-      lastEdit = now;
-      try {
-        await withTelegramRetry(() =>
-          ctx.telegram.editMessageText(chatId, placeholder.message_id, undefined, body, {
-            parse_mode: "MarkdownV2",
-          }),
-        );
-      } catch {
-        // Ignore message edit race/rate errors.
+      if (now - lastStreamUpdate < streamThrottleMs) return;
+      lastStreamUpdate = now;
+
+      if (isPrivate) {
+        try {
+          await sendTelegramDraft(ctx.telegram, chatId, turnDraftId, plainText, currentThreadId);
+        } catch {
+          // sendMessageDraft failed (e.g., API not yet available on this server).
+          // No fallback for private chats — just skip this update silently.
+        }
+      } else {
+        if (!placeholder) return;
+        try {
+          await withTelegramRetry(() =>
+            ctx.telegram.editMessageText(chatId, placeholder.message_id, undefined, formattedBody, {
+              parse_mode: "MarkdownV2",
+            }),
+          );
+        } catch {
+          // Ignore message edit race/rate errors.
+        }
       }
     };
 
@@ -1394,12 +1478,12 @@ export async function startTelegramBot(config: OperatorConfig, sessions: Session
           callbacks: {
             onText: (nextText) => {
               latestAssistantText = nextText;
-              void edit(renderTelegramBody(nextText, seenTools));
+              void streamUpdate(renderTelegramBody(nextText, seenTools), nextText);
             },
             onToolCall: (toolName) => {
               seenTools.push(toolName);
               logDebug("tool call observed", { chatId, toolName, conversationId });
-              void edit(renderTelegramBody(latestAssistantText, seenTools));
+              void streamUpdate(renderTelegramBody(latestAssistantText, seenTools), latestAssistantText);
             },
             onDispatchModelRequired: async (request) => {
               const promptKey = `${request.cwd}|${request.message}|${request.thinkingLevel || ""}`;
@@ -1465,15 +1549,25 @@ export async function startTelegramBot(config: OperatorConfig, sessions: Session
         });
 
         const final = renderTelegramBody(result.text || "(no response)", seenTools);
-        try {
+        if (isPrivate) {
+          // Sending a real message causes the draft to disappear automatically.
           await withTelegramRetry(() =>
-            ctx.telegram.editMessageText(chatId, placeholder.message_id, undefined, final, {
+            ctx.telegram.sendMessage(chatId, final, {
               parse_mode: "MarkdownV2",
+              ...(currentThreadId !== undefined ? { message_thread_id: currentThreadId } : {}),
             }),
           );
-        } catch (error) {
-          if (!isNotModifiedEditError(error)) {
-            throw error;
+        } else {
+          try {
+            await withTelegramRetry(() =>
+              ctx.telegram.editMessageText(chatId, placeholder!.message_id, undefined, final, {
+                parse_mode: "MarkdownV2",
+              }),
+            );
+          } catch (error) {
+            if (!isNotModifiedEditError(error)) {
+              throw error;
+            }
           }
         }
         logInfo("operator turn completed", {
@@ -1486,15 +1580,20 @@ export async function startTelegramBot(config: OperatorConfig, sessions: Session
       } catch (error) {
         const summary = telegramErrorSummary(error) || String(error);
         const message = escapeMarkdownV2(`Error: ${summary}`);
-        try {
-          await withTelegramRetry(() =>
-            ctx.telegram.editMessageText(chatId, placeholder.message_id, undefined, message, {
-              parse_mode: "MarkdownV2",
-            }),
-          );
-        } catch (editError) {
-          if (!isNotModifiedEditError(editError)) {
-            await withTelegramRetry(() => ctx.reply(message, { parse_mode: "MarkdownV2" }));
+        if (isPrivate) {
+          // No placeholder to edit; just send the error as a new message.
+          await withTelegramRetry(() => ctx.reply(message, { parse_mode: "MarkdownV2" }));
+        } else {
+          try {
+            await withTelegramRetry(() =>
+              ctx.telegram.editMessageText(chatId, placeholder!.message_id, undefined, message, {
+                parse_mode: "MarkdownV2",
+              }),
+            );
+          } catch (editError) {
+            if (!isNotModifiedEditError(editError)) {
+              await withTelegramRetry(() => ctx.reply(message, { parse_mode: "MarkdownV2" }));
+            }
           }
         }
         logInfo("operator turn failed", {
