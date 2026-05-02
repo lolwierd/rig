@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "@sinclair/typebox": "^0.34.41",
-    "fastify": "^5.7.4",
+    "fastify": "^5.8.5",
     "telegraf": "^4.16.3",
     "ws": "^8.18.3"
   },
